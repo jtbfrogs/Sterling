@@ -1,0 +1,39 @@
+# ============================================================
+# Sterling — M1 Mac Requirements
+# Python 3.11+
+# Install: pip install -r requirements_mac.txt
+# ============================================================
+
+# --- LLM ---
+ollama>=0.3.0
+
+# --- Wake Word ---
+# Wake detection is Whisper-based (faster-whisper, already listed under STT).
+# No extra library needed for runtime wake word detection.
+#
+# The following are needed only if you run scripts/train_wake_word.py
+# to build a custom openWakeWord model (optional / advanced):
+openwakeword>=0.6.0
+onnx>=1.14.0
+
+# --- Speech to Text ---
+faster-whisper>=1.0.0
+
+# --- Text to Speech ---
+edge-tts>=6.1.0
+
+# --- Audio I/O ---
+pyaudio>=0.2.14
+numpy>=1.24.0
+
+# --- Vision (HuskyLens2) ---
+pyserial>=3.5
+
+# --- Configuration ---
+pyyaml>=6.0.0
+
+# --- Spotify ---
+spotipy>=2.26.0
+
+# --- Utilities ---
+requests>=2.31.0

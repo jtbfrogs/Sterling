@@ -1,0 +1,103 @@
+sterling:
+  name: "Sterling"
+  startup_message: "Sterling online. All systems nominal. How may I assist you?"
+  shutdown_message: "Understood. Powering down. Goodbye."
+
+wake_word:
+  # Phrases that wake Sterling — case-insensitive, any phrase in the
+  # transcription triggers a response. Add or remove freely.
+  phrases:
+    - "hey sterling"    # most reliable — two distinct words
+    - "sterling"        # solid single-word trigger
+    - "ster"            # short variant
+    - "ling"            # note: also a substring of 'darling' — remove if you have false triggers
+
+  # Whisper model used for wake detection.
+  # tiny  → fastest (~150 ms), slightly less accurate  [recommended]
+  # base  → more accurate, ~300 ms (same model as full STT)
+  model_size: "tiny"
+
+  # RMS energy threshold for voice activity detection.
+  # Raise if background noise triggers false positives.
+  # Lower if Sterling misses quiet speech.
+  # Mirrors audio.silence_threshold by default if not set here.
+  energy_threshold: 500
+
+  # Seconds of silence after speech ends before transcription fires.
+  silence_duration: 0.6
+
+  # Maximum seconds of audio to buffer before forcing transcription.
+  max_buffer_seconds: 2.5
+
+llm:
+  model: "llama3.2"
+  base_url: "http://localhost:11434"
+  temperature: 0.7
+  context_window: 4096
+  stream: true
+  max_tokens: 512         # Max tokens in the LLM response. 128 = very brief | 512 = default | 1024+ = detailed
+
+stt:
+  model: "base"
+  language: "en"
+  device: "cpu"
+  compute_type: "int8"
+
+tts:
+  voice: "en-GB-RyanNeural"
+  rate: "+5%"
+  pitch: "-5Hz"
+  fallback_voice: "Alex"
+
+audio:
+  sample_rate: 16000
+  channels: 1
+  chunk_size: 1024
+  silence_threshold: 500
+  silence_duration: 1.5
+  max_recording_seconds: 30
+
+spotify:
+  enabled: false              # Set to true once you have your developer app credentials
+  client_id: ""               # From developer.spotify.com — create a free app
+  client_secret: ""           # From developer.spotify.com
+  redirect_uri: "http://localhost:8888/callback"   # Must match what you set in the app dashboard
+  cache_path: ".spotify_cache"                     # Where the OAuth token gets saved locally
+
+weather:
+  location: "Your City, State"      # Used for wttr.in weather lookups — no API key needed
+
+govee:
+  enabled: false              # Set to true once you have device IPs from discover_govee.py
+  discovery_timeout: 3        # Seconds to wait for UDP discovery responses
+  devices: []                 # Add your devices here after running discover_govee.py
+  # devices:
+  #   - name: "Room Lights"   # Friendly name — used in logs and (future) voice targeting
+  #     ip: "192.168.1.xxx"   # Find with: python scripts/discover_govee.py
+  #     device_id: ""         # Optional — from discovery output
+  #     sku: ""               # Optional — model number e.g. H6159
+
+vision:
+  enabled: false
+  port: null
+  baud_rate: 9600
+  timeout: 1.0
+  face_map:
+    1: "User"
+
+conversation:
+  # Seconds of silence after Sterling responds before it goes back to sleep.
+  # During this window the user can speak without saying the wake word.
+  timeout: 20
+  sleep_message: "Going quiet. Say my name when you need me."
+
+memory:
+  max_history: 20               # Max conversation turns (pairs) to keep in active context window
+  persist: true                 # Save every message to memory.json with timestamps
+  memory_file: "memory.json"    # Path to the JSON memory file (gitignored)
+  recall_turns: 10              # Turns to recall from previous sessions on startup (0 = fresh start every time)
+
+logging:
+  level: "INFO"
+  file: "sterling.log"
+  console: true
