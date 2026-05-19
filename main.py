@@ -421,12 +421,19 @@ class Sterling:
             full_response = ""
 
             if self._llm_stream:
-                full_response = self._tts.speak_streaming(
+                full_response, was_interrupted = self._speak_interruptible(
+                    self._tts.speak_streaming,
                     self._llm.stream(self._memory.get_messages()),
                 )
             else:
                 full_response = self._llm.chat(self._memory.get_messages())
-                self._tts.speak(full_response)
+                _, was_interrupted = self._speak_interruptible(
+                    self._tts.speak, full_response
+                )
+
+            if was_interrupted:
+                logger.info("Wake word interrupt — discarding partial response, listening again.")
+                continue
 
             if full_response:
                 self._memory.add_assistant(full_response)
@@ -507,6 +514,60 @@ class Sterling:
     # ─────────────────────────────────────────────────────────────────────────
     # Vision helpers
     # ─────────────────────────────────────────────────────────────────────────
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Wake word interruption
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _speak_interruptible(self, speak_func, *args) -> tuple[str, bool]:
+        """
+        Run a TTS call with wake word interruption support.
+
+        Swaps the microphone from the recorder to the wake word detector
+        for the duration of playback — the only safe way to run both
+        wake word detection and recording without CoreAudio conflicts.
+
+        A background thread calls wake_word.listen() in a loop. If the
+        wake phrase is detected, stop_event is set and TTS kills afplay
+        within its 50 ms poll cycle.
+
+        Returns:
+            (result, was_interrupted)
+            result         — return value of speak_func (str for speak_streaming, None for speak)
+            was_interrupted — True if wake word cut the speech short
+        """
+        import threading
+
+        stop_event  = threading.Event()
+        interrupted = threading.Event()
+
+        # Hand the microphone to the wake word detector
+        self._recorder.close_stream()
+        self._wake_word.resume()
+
+        def _monitor():
+            while not stop_event.is_set():
+                try:
+                    if self._wake_word.listen():
+                        logger.info("Wake word detected mid-speech — interrupting.")
+                        interrupted.set()
+                        stop_event.set()
+                except Exception as e:
+                    logger.debug(f"Interrupt monitor error: {e}")
+                    break
+
+        monitor = threading.Thread(target=_monitor, daemon=True)
+        monitor.start()
+
+        try:
+            result = speak_func(*args, stop_event=stop_event)
+        finally:
+            stop_event.set()              # stop monitor if TTS finished naturally
+            monitor.join(timeout=2.0)
+            self._wake_word.pause()       # hand mic back
+            self._recorder.open_stream()
+
+        return result, interrupted.is_set()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Conversation wind-down

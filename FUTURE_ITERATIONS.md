@@ -201,7 +201,11 @@ Each satellite handles wake word + audio only. STT, LLM, and TTS happen on the c
 Features planned across all builds:
 
 - **ChromaDB long-term memory** — "Sterling, remind me what we discussed about the API project"
-- **Interruption handling** — Say wake word mid-response to cut Sterling off immediately
+- **Wake word interruption** ✅ — Saying wake word mid-response stops TTS immediately; full Whisper phrase match (not just energy); partial response discarded from memory
+- **Conversation wind-down** ✅ — "I'm done" / "goodbye" / "talk later" → Sterling says goodbye → returns to wake word (not full shutdown)
+- **Govee smart lights** ✅ — Cloud API, on/off/color/brightness, mid-conversation control
+- **Spotify control** ✅ — Play/pause/skip/volume/search, intent parsed pre-LLM
+- **Weather** ✅ — wttr.in, current + two-day forecast, any location on the fly
 - **Custom wake word** — Train "Hey Sterling" via OpenWakeWord (free) or Picovoice Console
 - **Multi-user voice profiles** — Identify speaker, per-user memory and greetings
 - **Proactive awareness** — Sterling initiates: "Build finished — 3 warnings", "90 min break reminder"
@@ -268,17 +272,18 @@ quick code review. Good for a second pair of eyes before committing.
 
 ### Home & Environment
 
-**Spotify / Music Control**
-Spotify has a local API. "Sterling, play something chill", "Sterling, skip this", "Sterling, volume up."
-The `spotipy` library handles auth and playback control cleanly.
+**Spotify / Music Control** ✅
+Live — play/pause/skip/volume/search by artist or song. Needs client credentials + Premium account.
+
+**Govee Smart Lights** ✅
+Live — cloud API, on/off/color (15 colors)/brightness. Both devices configured (Bed lights + TV Backlight).
 
 **Smart Plug Control**
 TP-Link Kasa plugs have a local LAN API (no cloud required — same approach as Govee).
 "Sterling, turn off the PC monitors" or "Sterling, is the soldering iron on?"
 
-**Weather Awareness**
-Pull from wttr.in (no API key): "Sterling, should I open the window?" or "Will it rain today?"
-Simple HTTP call, clean JSON response.
+**Weather Awareness** ✅
+Live via wttr.in — current conditions + two-day forecast with precip %, any location on the fly.
 
 **Security / Presence Mode**
 When you leave: "Sterling, watch the room." → HuskyLens2 / YOLO monitors for motion/faces.
@@ -361,5 +366,5 @@ Future                │  Local GPT-4 class    │  Parakeet-TDT     │  Voice
 
 ---
 
-*Updated May 2026 — M1 Mac v1 operational, Jetson build planned when hardware acquired.*
+*Updated May 2026 — M1 Mac v1 operational with lights, Spotify, weather, and wake word interruption. Jetson Orin Nano owned — migration planned.*
 **Sterling Project**
