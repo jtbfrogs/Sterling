@@ -35,5 +35,8 @@ pyyaml>=6.0.0
 # --- Spotify ---
 spotipy>=2.26.0
 
+# --- Memory ---
+chromadb>=1.5.0
+
 # --- Utilities ---
 requests>=2.31.0

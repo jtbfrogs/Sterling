@@ -1,0 +1,68 @@
+# ============================================================
+# Sterling — Linux Requirements (v4 — Jetson Orin / x86 GPU)
+# Python 3.11+
+# Install: pip install -r requirements_linux.txt
+#
+# Prerequisites before pip install:
+#
+#   Jetson Orin (JetPack 6):
+#     - JetPack 6 already includes CUDA, cuDNN, PyTorch for ARM
+#     - Ollama ARM build: curl -fsSL https://ollama.ai/install.sh | sh
+#     - PortAudio: sudo apt install portaudio19-dev
+#     - Audio utils: sudo apt install alsa-utils ffmpeg libsndfile1
+#
+#   x86 Linux (NVIDIA GPU):
+#     - CUDA Toolkit 12.x: follow NVIDIA guide for your distro
+#     - Ollama: curl -fsSL https://ollama.ai/install.sh | sh
+#     - PortAudio: sudo apt install portaudio19-dev
+#
+#   Both:
+#     - sudo apt install python3.11 python3.11-venv build-essential
+# ============================================================
+
+# --- LLM ---
+ollama>=0.3.0
+
+# --- Wake Word ---
+# OpenWakeWord preferred on Linux — no Picovoice key required
+openwakeword>=0.6.0
+onnx>=1.14.0
+
+# --- Speech to Text ---
+faster-whisper>=1.0.0    # uses CUDA automatically if available
+
+# --- Text to Speech (Fully Offline) ---
+# Piper TTS — fast, offline, runs well on Jetson ARM and x86
+# Install: pip install piper-tts
+# Voices: en_GB-alan-medium or en_GB-vctk-medium for British male
+# piper-tts>=1.2.0
+
+# Edge-TTS kept as fallback if internet is available
+edge-tts>=6.1.0
+
+# --- Audio I/O ---
+pyaudio>=0.2.14
+numpy>=1.24.0
+
+# --- Vision ---
+pyserial>=3.5
+# ultralytics>=8.3.0    # YOLO v11 — uncomment for webcam vision
+
+# --- Long-term Memory (planned) ---
+# chromadb>=0.5.0
+# sentence-transformers>=3.0.0
+
+# --- Home Assistant Integration (planned) ---
+# requests already included below
+
+# --- Smart Lights ---
+# (no change)
+
+# --- Spotify ---
+spotipy>=2.26.0
+
+# --- Configuration ---
+pyyaml>=6.0.0
+
+# --- Utilities ---
+requests>=2.31.0

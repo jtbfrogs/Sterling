@@ -57,6 +57,9 @@ audio:
   silence_duration: 1.5
   max_recording_seconds: 30
 
+workspace:
+  path: "~/sterling_projects"   # Where Sterling creates new projects. Never touches files outside this folder.
+
 spotify:
   enabled: false              # Set to true once you have your developer app credentials
   client_id: ""               # From developer.spotify.com — create a free app

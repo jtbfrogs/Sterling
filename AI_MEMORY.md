@@ -17,7 +17,7 @@
 |---|---|
 | Wake Word | Faster-Whisper `tiny` + energy VAD — any phrase, no training, no API key |
 | STT | Faster-Whisper `base`, CPU, int8 |
-| LLM | Ollama + `llama3.2:1b` via `http://localhost:11434` |
+| LLM | Ollama + `llama3.2:3b` via `http://localhost:11434` |
 | TTS | Edge-TTS `en-GB-RyanNeural` + macOS `say` fallback |
 | Lights | Govee cloud HTTP API (api_key + device_id + model/SKU) |
 | Music | Spotify Web API via spotipy (Premium required for playback control) |
@@ -35,7 +35,8 @@ core/wake_word.py          ← Faster-Whisper wake word + energy VAD
 core/stt.py                ← Faster-Whisper STT
 core/llm.py                ← Ollama client (chat + stream)
 core/tts.py                ← Edge-TTS sentence-streaming + stop_event interruption
-core/memory.py             ← sliding window + JSON persistence + cross-session recall
+core/memory.py             ← session window + ChromaDB semantic recall + JSON archive
+core/workspace.py          ← project scaffolding (Python/C/C++/JS/Rust/Go/Bash) + LLM code gen
 core/vision.py             ← HuskyLens2 binary UART protocol
 core/govee.py              ← GoveeCloud (HTTP) + GoveeLocal (UDP) — same interface
 core/spotify.py            ← Spotify Web API via spotipy (play/pause/skip/volume/search)
@@ -80,7 +81,17 @@ README.md                  ← up-to-date quick-start + voice command reference
   - Stream swap is the key — CoreAudio can't have two input streams simultaneously
 - One stream at a time: wake word stream paused during conversation, recorder open throughout
 - TTS sentence-streams: Sterling speaks sentence 1 while LLM generates the rest
-- Memory persists to `memory.json` — timestamped, session-aware, auto-recalled on startup
+- Model upgraded: llama3.2:1b → llama3.2:3b — smarter, still fits M1 8GB
+- ChromaDB semantic long-term memory (replaces blind JSON recall injection)
+  - Every exchange embedded + stored in `.chroma/` (gitignored)
+  - On each LLM call: semantic query injects top 3 relevant past exchanges
+  - Session window: 10 turns | JSON recency anchor: 2 turns
+  - Embedding: all-MiniLM-L6-v2 ONNX, 79MB one-time download, auto-cached
+  - Falls back to JSON recall if ChromaDB unavailable
+- Workspace project creation at `/Users/jtb/src/sterling`
+  - Python (+venv), C, C++, JavaScript, Rust, Go, Bash
+  - Separate 1024-token code-only prompt for generation
+- Memory persists to `memory.json` — timestamped, session-aware
 - System prompt: short and casual — brevity rule is first instruction, no markdown
 
 ---

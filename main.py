@@ -31,6 +31,7 @@ from core.memory import Memory
 from core.vision import HuskyLens, ALGORITHM_FACE_RECOGNITION
 from core.govee import GoveeCloud, GoveeLocal, COLORS
 from core.spotify import Spotify
+from core.workspace import Workspace, LANGUAGE_ALIASES
 from utils.audio import AudioRecorder
 from utils.logger import setup_logger
 from utils.text import truncate_for_display
@@ -106,6 +107,7 @@ class Sterling:
         self._init_vision(enable_vision)
         self._init_govee()
         self._init_spotify()
+        self._init_workspace()
 
         logger.info("All subsystems ready.")
 
@@ -118,10 +120,13 @@ class Sterling:
         mem_cfg = self._config.get("memory", {})
         self._memory = Memory(
             system_prompt=system_prompt,
-            max_history=mem_cfg.get("max_history", 20),
+            max_history=mem_cfg.get("max_history", 10),
             persist=mem_cfg.get("persist", True),
             memory_file=mem_cfg.get("memory_file", "memory.json"),
-            recall_turns=mem_cfg.get("recall_turns", 10),
+            recall_turns=mem_cfg.get("recall_turns", 2),
+            chroma_enabled=mem_cfg.get("chroma_enabled", True),
+            chroma_path=mem_cfg.get("chroma_path", ".chroma"),
+            chroma_results=mem_cfg.get("chroma_results", 3),
         )
         logger.info("✓ Memory initialized")
 
@@ -223,6 +228,21 @@ class Sterling:
         except Exception as e:
             logger.warning(f"  Vision unavailable: {e}")
             logger.warning("  Continuing without vision. Check USB connection.")
+
+    def _init_workspace(self):
+        self._workspace: Workspace | None = None
+        ws_cfg = self._config.get("workspace", {})
+        path   = ws_cfg.get("path", "").strip()
+
+        if not path:
+            logger.info("  Workspace disabled (set workspace.path in config to enable)")
+            return
+
+        try:
+            self._workspace = Workspace(path)
+            logger.info(f"✓ Workspace ready — {self._workspace.root}")
+        except Exception as e:
+            logger.warning(f"  Workspace unavailable: {e}")
 
     def _init_spotify(self):
         self._spotify: Spotify | None = None
@@ -393,6 +413,14 @@ class Sterling:
                 light_action = self._parse_light_intent(text)
                 if light_action:
                     self._execute_light_command(light_action)
+
+            # Project creation — scaffold + generate code, then let LLM respond
+            if self._workspace:
+                project_intent = self._parse_project_intent(text)
+                if project_intent:
+                    project_result = self._create_project(project_intent)
+                    if project_result:
+                        llm_text = f"{text}\n\n[{project_result}]"
 
             # Weather — inject current conditions so LLM can answer naturally
             llm_text = text
@@ -682,6 +710,115 @@ class Sterling:
         if match:
             return match.group(1).strip()
         return ""
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Project creation
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _parse_project_intent(self, text: str) -> dict | None:
+        """
+        Detect a project creation request and extract language, name, description.
+
+        Returns a dict or None:
+            {"language": "python", "name": "tracker", "description": "scrapes weather data"}
+        """
+        t = text.lower()
+
+        create_words  = ("create", "make", "build", "start", "new", "set up", "setup", "initialise", "initialize")
+        project_words = ("project", "app", "application", "script", "program", "tool")
+
+        if not any(w in t for w in create_words):
+            return None
+        if not any(w in t for w in project_words):
+            return None
+
+        # Detect language — default to Python
+        language = "python"
+        for alias, lang in LANGUAGE_ALIASES.items():
+            if alias in t:
+                language = lang
+                break
+
+        # Extract project name after "called" or "named"
+        name_match = re.search(
+            r'(?:called|named)\s+([a-zA-Z0-9][a-zA-Z0-9_\s-]*?)'
+            r'(?:\s+that|\s+which|\s+to\s|\s*\?|\s*$)',
+            t,
+        )
+        if not name_match:
+            return None
+
+        name = name_match.group(1).strip()
+
+        # Extract optional description after "that" / "which" / "to"
+        desc_match = re.search(r'(?:that|which)\s+(.+?)(?:\?|$)', t)
+        description = desc_match.group(1).strip() if desc_match else ""
+
+        return {"language": language, "name": name, "description": description}
+
+    def _create_project(self, intent: dict) -> str:
+        """
+        Scaffold the project and optionally generate starter code via LLM.
+        Returns a plain-English summary injected into the LLM context.
+        """
+        language    = intent["language"]
+        name        = intent["name"]
+        description = intent.get("description", "")
+        code        = None
+
+        # Generate starter code if a description was given
+        if description:
+            logger.info(f"Generating {language} code for: {description}")
+            code = self._generate_code(language, description)
+
+        try:
+            result = self._workspace.create_project(
+                name=name,
+                language=language,
+                code=code,
+                description=description,
+            )
+        except Exception as e:
+            logger.error(f"Project creation failed: {e}")
+            return f"Project creation failed: {e}"
+
+        venv_note = " A venv was set up inside the folder." if language == "python" else ""
+        code_note = f" Generated starter code based on: {description}." if code else " A blank template was used."
+        return (
+            f"{language.capitalize()} project '{name}' created at {result['path']}."
+            f"{code_note}{venv_note}"
+        )
+
+    def _generate_code(self, language: str, description: str) -> str:
+        """
+        Ask the LLM to write code for the given language and description.
+        Uses a dedicated code-generation prompt — overrides the normal system prompt.
+        """
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    f"You are an expert {language} programmer. "
+                    f"Output ONLY clean, working {language} code with no explanation, "
+                    f"no markdown fences, and no commentary. "
+                    f"The code should be well-structured and follow best practices."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Write a {language} program that {description}.",
+            },
+        ]
+        try:
+            # Use a higher token limit for code generation
+            original_max = self._llm._max_tokens
+            self._llm._max_tokens = 1024
+            code = self._llm.chat(messages)
+            self._llm._max_tokens = original_max
+            return code.strip()
+        except Exception as e:
+            logger.error(f"Code generation failed: {e}")
+            return ""
 
     def _is_weather_query(self, text: str) -> bool:
         """Returns True if the user is asking about the weather."""

@@ -366,5 +366,54 @@ Future                │  Local GPT-4 class    │  Parakeet-TDT     │  Voice
 
 ---
 
+## 8. Remote Access — iPhone / Mobile (Long-term)
+
+Not a priority but worth noting for the future. The goal would be accessing Sterling from anywhere via iPhone — type or speak a question, get a response back.
+
+### Recommended Approach (when ready)
+
+**Step 1 — Flask API layer**
+Add a small Flask server to Sterling exposing a `/chat` endpoint. Text in, response out. Sits on top of the existing Sterling core — no changes to the voice pipeline.
+
+```python
+# rough idea
+@app.route("/chat", methods=["POST"])
+def chat():
+    text = request.json["message"]
+    response = sterling.chat(text)   # reuses existing LLM + memory
+    return {"response": response}
+```
+
+**Step 2 — Tailscale for remote access**
+Free, 5 minute setup. Install on the Mac (or Jetson) and iPhone. They see each other like they're on the same network regardless of location. No port forwarding, no static IP, no security exposure.
+
+```bash
+# Mac
+brew install tailscale
+sudo tailscale up
+
+# iPhone: install Tailscale from App Store, log in with same account
+# Then hit http://[tailscale-ip]:5000 from Safari anywhere
+```
+
+**Step 3 — Simple web UI**
+A basic HTML page served by Flask. Text input, send button, response display. Works in Safari on iPhone with no app install needed.
+
+### Levels of Complexity
+
+| Goal | Effort | Notes |
+|---|---|---|
+| Text chat via Safari | Low | Flask + Tailscale, afternoon project |
+| Voice from iPhone | Medium | Browser mic needs HTTPS, noticeable latency |
+| Proper iPhone app | High | Swift or React Native, full project |
+
+### Notes
+- Voice from browser requires HTTPS — use Cloudflare Tunnel or self-signed cert
+- Latency on voice will be higher than local (audio round-trip over internet)
+- Carries over to Jetson unchanged — same Flask API, different host IP
+- Text chat is the sensible scope for a first pass
+
+---
+
 *Updated May 2026 — M1 Mac v1 operational with lights, Spotify, weather, and wake word interruption. Jetson Orin Nano owned — migration planned.*
 **Sterling Project**

@@ -34,3 +34,4 @@ memory.tmp
 
 # macOS
 .DS_Store
+.chroma/
