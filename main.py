@@ -399,6 +399,9 @@ class Sterling:
             # Wind-down detection — let LLM say goodbye first, then return to wake word
             winding_down = self._is_winddown(text)
 
+            # Track which intent fired so later parsers can skip
+            intent_handled = False
+
             # Spotify control — execute immediately, let LLM respond naturally
             spotify_context = None
             if self._spotify:
@@ -407,15 +410,17 @@ class Sterling:
                     self._execute_spotify_command(spotify_action)
                     if spotify_action["action"] == "now_playing":
                         spotify_context = spotify_action.get("result")
+                    intent_handled = True
 
             # Light control — execute immediately, then let LLM respond naturally
-            if self._govee and self._govee.has_devices:
+            if not intent_handled and self._govee and self._govee.has_devices:
                 light_action = self._parse_light_intent(text)
                 if light_action:
                     self._execute_light_command(light_action)
+                    intent_handled = True
 
-            # Project creation — scaffold + generate code, then let LLM respond
-            if self._workspace:
+            # Project creation — only if no other intent already fired
+            if not intent_handled and self._workspace:
                 project_intent = self._parse_project_intent(text)
                 if project_intent:
                     project_result = self._create_project(project_intent)
@@ -724,8 +729,10 @@ class Sterling:
         """
         t = text.lower()
 
-        create_words  = ("create", "make", "build", "start", "new", "set up", "setup", "initialise", "initialize")
-        project_words = ("project", "app", "application", "script", "program", "tool")
+        # Require an explicit create verb alongside an explicit project noun.
+        # Kept strict to avoid false positives from Spotify/weather/light phrases.
+        create_words  = ("create", "make me a", "make a", "build", "set up", "setup", "initialise", "initialize")
+        project_words = ("project", "application", "script", "program")
 
         if not any(w in t for w in create_words):
             return None

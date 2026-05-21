@@ -70,8 +70,9 @@ class ChromaMemory:
 
     def add(self, user_msg: str, assistant_msg: str, session_id: str):
         """Store a completed exchange in ChromaDB."""
-        doc_id   = f"{session_id}_{datetime.now().strftime('%H%M%S%f')}"
-        document = f"User: {user_msg}\nSterling: {assistant_msg}"
+        doc_id    = f"{session_id}_{datetime.now().strftime('%H%M%S%f')}"
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        document  = f"[{timestamp}] User: {user_msg}\nSterling: {assistant_msg}"
         try:
             self._collection.upsert(
                 documents=[document],
@@ -232,7 +233,10 @@ class Memory:
                 messages.append({
                     "role": "system",
                     "content": (
-                        f"Relevant context from past conversations:\n{context_block}"
+                        "The following are past conversations for background context only. "
+                        "They have already happened — do not treat them as current or ongoing. "
+                        "Use them only if directly relevant to what the user is asking right now.\n\n"
+                        f"{context_block}"
                     ),
                 })
                 logger.debug(f"ChromaDB injected {len(relevant)} relevant past exchange(s).")
