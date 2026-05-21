@@ -527,22 +527,54 @@ class Sterling:
             return True
 
         # ── Vision commands ───────────────────────────────────────────────────
-        if self._vision:
-            if any(phrase in t for phrase in [
-                "who's in the room", "who is in the room",
-                "who do you see", "who's there"
-            ]):
+        face_phrases   = [
+            "who's in the room", "who is in the room",
+            "who do you see", "who's there", "anyone in the room",
+        ]
+        object_phrases = [
+            "what do you see", "what's in front of you", "what can you see",
+            "look at this", "what is this", "what are you looking at",
+        ]
+        if any(phrase in t for phrase in face_phrases + object_phrases):
+            if not self._vision:
+                self._tts.speak(
+                    "Camera is offline right now, so I can't see anything."
+                )
+                return True
+            if any(phrase in t for phrase in face_phrases):
                 self._report_faces()
-                return True
-
-            if any(phrase in t for phrase in [
-                "what do you see", "what's in front of you",
-                "look at this", "what is this"
-            ]):
+            else:
                 self._report_objects()
-                return True
+            return True
+
+        # diagnostics
+        if any(phrase in t for phrase in [
+            "run diagnostics", "system status", "what's working",
+            "what is working", "systems check", "your status",
+        ]):
+            self._speak_diagnostics()
+            return True
 
         return False
+
+    def _speak_diagnostics(self):
+        """Speak a plain-English summary of which systems are actually online."""
+        parts = []
+        parts.append("camera is " + ("online" if self._vision else "offline"))
+
+        if self._govee and self._govee.has_devices:
+            n = len(self._govee.device_names)
+            parts.append(f"lights are online with {n} device{'s' if n != 1 else ''} connected")
+        else:
+            parts.append("lights are offline or not set up")
+
+        parts.append("Spotify is " + ("online" if self._spotify else "offline or not configured"))
+        parts.append("weather is available")
+        parts.append("workspace is " + ("ready" if self._workspace else "not configured"))
+
+        joined = ", ".join(parts[:-1]) + ", and " + parts[-1]
+        self._tts.speak(f"Here's where things stand. {joined.capitalize()}.")
+        logger.info("Diagnostics spoken.")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Vision helpers
