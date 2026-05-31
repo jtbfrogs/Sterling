@@ -13,7 +13,9 @@
 4. [Sterling v4 — Linux Build](#4-sterling-v4--linux-build)
 5. [Shared Feature Roadmap](#5-shared-feature-roadmap)
 6. [Ideas — What Could Sterling Actually Do?](#6-ideas--what-could-sterling-actually-do)
-7. [Model Upgrade Path](#7-model-upgrade-path)
+7. [Vision Upgrade — USB Webcam + YOLO + Face Recognition](#7-vision-upgrade--usb-webcam--yolo--face-recognition)
+8. [Model Upgrade Path](#8-model-upgrade-path)
+9. [Remote Access — iPhone / Mobile (Long-term)](#9-remote-access--iphone--mobile-long-term)
 
 ---
 
@@ -352,7 +354,145 @@ summarises at the end. "Sterling, what did we agree on?" → LLM summary of the 
 
 ---
 
-## 7. Model Upgrade Path
+## 7. Vision Upgrade — USB Webcam + YOLO + Face Recognition
+
+Replaces the HuskyLens2 with a standard USB webcam running YOLO for object/person detection
+and the `face_recognition` library for identifying specific people. More capable, no proprietary
+hardware, works on every platform Sterling runs on.
+
+---
+
+### Why Replace HuskyLens
+
+| | HuskyLens2 | USB Webcam + YOLO |
+|---|---|---|
+| Person detection | ✅ | ✅ much better |
+| Object detection | Limited | ✅ 80+ COCO classes |
+| Face recognition | ✅ on-device | ✅ via face_recognition lib |
+| Hardware | Proprietary lens | Any USB webcam |
+| Face enrollment | Physical button | Photos in a folder |
+| Connectivity | USB Serial / UART | USB Video (UVC) |
+| Platform support | Limited | Universal |
+
+---
+
+### Architecture
+
+HuskyLens is queried on-demand (ask → reply). A webcam needs a background
+capture thread keeping the latest frame in memory so queries are instant:
+
+```
+Background thread:  cv2.VideoCapture → latest_frame (always fresh)
+On query:           YOLO(latest_frame)  → detected objects + persons
+                    face_recognition()  → who is in frame
+```
+
+The new `core/vision_webcam.py` will expose the same interface as `core/vision.py`
+so `main.py` requires zero changes. A config flag picks the backend:
+
+```yaml
+vision:
+  backend: "webcam"        # webcam | huskylens
+  device_index: 0          # USB camera index (0 = first camera)
+  yolo_model: "yolov8n.pt" # nano = fastest | yolov8s = more accurate
+  face_recognition: true
+  known_faces_dir: "faces/" # folder of named JPEGs — faces/jtb.jpg etc.
+```
+
+---
+
+### Face Enrollment
+
+No physical button. Just drop a photo in the `faces/` folder:
+
+```
+faces/
+  jtb.jpg          → recognised as "jtb"
+  guest.jpg        → recognised as "guest"
+```
+
+Sterling loads encodings at startup. Adding a new person = drop a photo and restart.
+
+---
+
+### Dependencies
+
+**M1 Mac:**
+```bash
+# YOLO + OpenCV
+pip install ultralytics opencv-python
+
+# face_recognition — needs dlib compiled first
+brew install cmake
+pip install dlib
+pip install face_recognition
+
+# YOLO uses Metal (MPS) automatically on M1 — no extra config
+```
+
+**Jetson Orin (JetPack 6):**
+```bash
+# OpenCV comes pre-installed with JetPack
+# YOLO
+pip install ultralytics
+
+# dlib with CUDA support
+pip install dlib  # JetPack provides CUDA — dlib picks it up automatically
+pip install face_recognition
+
+# YOLO uses CUDA automatically on Jetson
+```
+
+**Windows (RTX 3060):**
+```bash
+pip install ultralytics opencv-python
+pip install dlib  # pre-built wheel available for Windows
+pip install face_recognition
+
+# YOLO uses CUDA automatically when torch+cuda is installed
+```
+
+---
+
+### YOLO Model Size Guide
+
+| Model | Size | Speed (M1) | Speed (Jetson Orin) | Best for |
+|---|---|---|---|---|
+| yolov8n | ~6 MB | Very fast | Very fast | Always-on monitoring |
+| yolov8s | ~22 MB | Fast | Fast | Better accuracy |
+| yolov8m | ~52 MB | Moderate | Fast (CUDA) | High accuracy |
+| yolov8l | ~87 MB | Slow on CPU | Moderate | Jetson / GPU only |
+
+Recommendation: `yolov8n` on M1 Mac and Jetson Nano, `yolov8s` on Jetson Orin / 3060.
+
+---
+
+### What It Unlocks
+
+- **Person detection** — "Is anyone in the room?" with actual accuracy
+- **Object recognition** — 80 COCO classes: laptop, phone, cup, book, etc.
+- **Face recognition** — "Who's in the room?" identifies registered faces
+- **Stranger detection** — alerts when an unrecognised face is detected
+- **Activity awareness** — future: gesture recognition, posture detection
+- **Always-on monitoring** — background thread means no query lag
+
+---
+
+### Files to Create / Modify
+
+```
+core/vision_webcam.py     ← NEW — WebcamVision class (same interface as HuskyLens)
+faces/                    ← NEW — folder for face enrollment photos
+main.py                   ← small change in _init_vision() to pick backend from config
+requirements_mac.txt      ← add ultralytics, opencv-python, face_recognition
+requirements_windows.txt  ← same
+requirements_linux.txt    ← same
+config.yaml.example       ← add vision.backend, device_index, yolo_model, known_faces_dir
+```
+
+---
+
+## 8. Model Upgrade Path
 
 ```
 Platform              │  LLM                  │  STT              │  TTS
@@ -366,7 +506,7 @@ Future                │  Local GPT-4 class    │  Parakeet-TDT     │  Voice
 
 ---
 
-## 8. Remote Access — iPhone / Mobile (Long-term)
+## 9. Remote Access — iPhone / Mobile (Long-term)
 
 Not a priority but worth noting for the future. The goal would be accessing Sterling from anywhere via iPhone — type or speak a question, get a response back.
 
