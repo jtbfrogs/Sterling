@@ -77,8 +77,11 @@ examples/                  ← standalone reference implementations
   - `_speak_interruptible()` swaps mic: recorder → wake word detector during TTS
   - Full Whisper phrase match (not energy) — stops on wake word only
   - stop_event → afplay killed within 50ms; partial response discarded from memory
+  - Monitor passes stop_event to `listen()` so it skips Whisper transcription on exit (~32ms vs 200ms)
+  - CRITICAL ordering: join monitor → pause wake stream → open recorder
+    Opening recorder before pausing wake stream = two simultaneous CoreAudio inputs = segfault
 - Intent mutual exclusion: Spotify, lights, project creation checked in order with `intent_handled` flag
-- Vision: USB webcam + YOLOv8 + face_recognition — HuskyLens fully removed
+- Vision: USB webcam + YOLOv8 + face_recognition — HuskyLens fully removed; `vision.enabled: true` in config.yaml
   - `vision/webcam.py` — background capture thread, YOLO object detection, face ID from `vision/faces/`
   - System status injected into prompt at startup so LLM knows what's online/offline
   - Vision queries intercepted before LLM if camera offline — honest "camera offline" response
@@ -91,8 +94,14 @@ examples/                  ← standalone reference implementations
   - Separate 1024-token code-only LLM prompt for generation
 - ChromaDB context injection explicitly timestamped and labelled as past — prevents LLM treating old exchanges as current
 - Diagnostics command: "run diagnostics" / "system status" → speaks what's online/offline
-- Ctrl+C fix: wake-word loop moved to daemon thread; main thread does `join(timeout=0.5)` so Python
-  can deliver signals — PyAudio's `stream.read()` is a blocking C call that swallows signals on macOS
+- `_handle_command` returns True for ALL built-in commands; `_conversation_loop` only `break`s on
+  actual shutdown (`not self._running`); all other commands (vision, diagnostics, memory) `continue`
+- ChromaDB broken on Python 3.14 (missing `chromadb_rust_bindings`) — falls back to JSON recall gracefully
+- Ultralytics/YOLO verbose suppressed via `YOLO_VERBOSE=False` env + `logging.getLogger("ultralytics")` level
+- Ctrl+C: `os._exit(0)` in signal handler — saves memory then force-exits.
+  PyAudio's `Pa_StopStream` can deadlock on macOS in the graceful-shutdown path so we skip it.
+  - `listen_for_speech()` has `try/except OSError` for stream-closed-externally resilience
+  - `terminate()` calls `close_stream()` first so PyAudio never terminates with open streams
 
 ---
 
@@ -106,7 +115,8 @@ examples/                  ← standalone reference implementations
 ---
 
 ## Needs / Next Up
-- [ ] Test webcam vision end-to-end (`pip install ultralytics dlib opencv-python face_recognition`)
+- [x] Vision enabled in config.yaml — cv2 / ultralytics / face_recognition all installed
+- [ ] Test webcam vision end-to-end (deps confirmed present)
 - [ ] Tune `silence_threshold` and `wake_word.energy_threshold` for jtb's mic/room
 - [ ] Verify wake word interruption feels natural (~0.8–1s stop delay expected)
 - [ ] Check Jetson RAM: `free -h` — 4GB or 8GB determines LLM model choice

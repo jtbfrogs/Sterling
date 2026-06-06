@@ -198,11 +198,12 @@ class TTS:
 
         # Use timeout-based joins so Ctrl+C / KeyboardInterrupt is always
         # delivered to the main thread even if a child thread is blocking.
+        # 50 ms poll keeps latency tight while still being interruptible.
         try:
             while prod_thread.is_alive():
-                prod_thread.join(timeout=0.2)
+                prod_thread.join(timeout=0.05)
             while cons_thread.is_alive():
-                cons_thread.join(timeout=0.2)
+                cons_thread.join(timeout=0.05)
         except KeyboardInterrupt:
             stop.set()          # signal both threads to exit
             self.stop()         # kill afplay immediately

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sterling — Advanced AI Room Assistant
+Sterling - Advanced AI Room Assistant
 ======================================
 Inspired by J.A.R.V.I.S from Iron Man.
 
@@ -14,11 +14,18 @@ Usage:
     python main.py --no-vision
 """
 
+import os
 import re
 import sys
 import signal
 import argparse
+import warnings
 from pathlib import Path
+
+# Suppress pkg_resources deprecation spam from face_recognition_models.
+# The library still works fine - this is a cosmetic warning from an old dep.
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
+warnings.filterwarnings("ignore", message="Deprecated call to `pkg_resources", category=DeprecationWarning)
 
 import pyaudio
 import yaml
@@ -94,7 +101,7 @@ class Sterling:
         )
 
         logger.info("=" * 60)
-        logger.info("  STERLING — AI Room Assistant")
+        logger.info("  STERLING - AI Room Assistant")
         logger.info("=" * 60)
         logger.info("Initializing subsystems...")
 
@@ -133,7 +140,7 @@ class Sterling:
     def _init_wake_word(self):
         ww_cfg = self._config.get("wake_word", {})
 
-        # Phrase list — fallback to audio silence threshold for energy
+        # Phrase list - fallback to audio silence threshold for energy
         audio_cfg = self._config.get("audio", {})
         default_threshold = audio_cfg.get("silence_threshold", 500)
 
@@ -149,7 +156,7 @@ class Sterling:
             max_buffer_seconds=ww_cfg.get("max_buffer_seconds", 2.5),
         )
         logger.info(
-            f"✓ Wake word detector ready — phrases: {phrases}"
+            f"✓ Wake word detector ready - phrases: {phrases}"
         )
 
     def _init_recorder(self):
@@ -231,7 +238,7 @@ class Sterling:
 
         try:
             self._workspace = Workspace(path)
-            logger.info(f"✓ Workspace ready — {self._workspace.root}")
+            logger.info(f"✓ Workspace ready - {self._workspace.root}")
         except Exception as e:
             logger.warning(f"  Workspace unavailable: {e}")
 
@@ -284,13 +291,13 @@ class Sterling:
             api_key = govee_cfg.get("api_key", "").strip()
             if api_key:
                 self._govee = GoveeCloud(api_key=api_key, devices=devices)
-                logger.info(f"✓ Govee (cloud API) — {len(devices)} device(s)")
+                logger.info(f"✓ Govee (cloud API) - {len(devices)} device(s)")
             else:
                 self._govee = GoveeLocal(
                     devices=devices,
                     discovery_timeout=govee_cfg.get("discovery_timeout", 3.0),
                 )
-                logger.info(f"✓ Govee (local LAN) — {len(devices)} device(s)")
+                logger.info(f"✓ Govee (local LAN) - {len(devices)} device(s)")
         except Exception as e:
             logger.warning(f"  Govee unavailable: {e}")
 
@@ -312,7 +319,7 @@ class Sterling:
         logger.info("-" * 60)
 
         # Run the blocking wake-word loop in a daemon thread.
-        # PyAudio's stream.read() is a blocking C call — on macOS it swallows
+        # PyAudio's stream.read() is a blocking C call - on macOS it swallows
         # Ctrl+C because Python only delivers signals between bytecode instructions,
         # not during C extension calls. Keeping the main thread in a Python-level
         # join(timeout) loop means Ctrl+C always gets through.
@@ -361,7 +368,7 @@ class Sterling:
     def _conversation_loop(self):
         """
         Natural multi-turn conversation after the wake word fires.
-        No wake word needed between turns — Sterling listens continuously
+        No wake word needed between turns - Sterling listens continuously
         and responds until the user goes silent for `conversation.timeout`
         seconds, or says a shutdown/goodbye phrase.
 
@@ -372,9 +379,9 @@ class Sterling:
         conv_cfg  = self._config.get("conversation", {})
         timeout   = conv_cfg.get("timeout", 20)   # seconds of silence before sleeping
 
-        logger.info(f"Conversation mode active — {timeout}s idle timeout")
+        logger.info(f"Conversation mode active - {timeout}s idle timeout")
 
-        # One stream open for the entire conversation — eliminates the
+        # One stream open for the entire conversation - eliminates the
         # ~200 ms open/close gap that was clipping the first word of each turn.
         self._recorder.open_stream()
         try:
@@ -384,33 +391,38 @@ class Sterling:
             audio = self._recorder.listen_for_speech(timeout_seconds=timeout)
 
             if audio is None:
+                # Check if this is a shutdown-triggered abort rather than a real timeout
+                if not self._running:
+                    break
                 # Nobody spoke within the timeout window
                 sleep_msg = conv_cfg.get(
                     "sleep_message", "Going quiet. Say my name when you need me."
                 )
                 self._tts.speak(sleep_msg)
-                logger.info(f"Conversation idle for {timeout}s — returning to wake word mode.")
+                logger.info(f"Conversation idle for {timeout}s - returning to wake word mode.")
                 break
 
             # Transcribe what the user said
             text = self._stt.transcribe(audio)
             if not text:
-                logger.debug("No speech content — continuing to listen.")
+                logger.debug("No speech content - continuing to listen.")
                 continue
 
             logger.info(f"User said: {truncate_for_display(text, 100)}")
 
             # Built-in commands (shutdown, clear memory, etc.)
             if self._handle_command(text):
-                break  # commands like "shut down" set _running=False or exit loop
+                if not self._running:
+                    break       # actual shutdown — leave conversation
+                continue        # vision / diagnostics / memory clear — already spoke, keep listening
 
-            # Wind-down detection — let LLM say goodbye first, then return to wake word
+            # Wind-down detection - let LLM say goodbye first, then return to wake word
             winding_down = self._is_winddown(text)
 
             # Track which intent fired so later parsers can skip
             intent_handled = False
 
-            # Spotify control — execute immediately, let LLM respond naturally
+            # Spotify control - execute immediately, let LLM respond naturally
             spotify_context = None
             if self._spotify:
                 spotify_action = self._parse_spotify_intent(text)
@@ -420,14 +432,14 @@ class Sterling:
                         spotify_context = spotify_action.get("result")
                     intent_handled = True
 
-            # Light control — execute immediately, then let LLM respond naturally
+            # Light control - execute immediately, then let LLM respond naturally
             if not intent_handled and self._govee and self._govee.has_devices:
                 light_action = self._parse_light_intent(text)
                 if light_action:
                     self._execute_light_command(light_action)
                     intent_handled = True
 
-            # Project creation — only if no other intent already fired
+            # Project creation - only if no other intent already fired
             if not intent_handled and self._workspace:
                 project_intent = self._parse_project_intent(text)
                 if project_intent:
@@ -435,7 +447,7 @@ class Sterling:
                     if project_result:
                         llm_text = f"{text}\n\n[{project_result}]"
 
-            # Weather — inject current conditions so LLM can answer naturally
+            # Weather - inject current conditions so LLM can answer naturally
             llm_text = text
             if self._is_weather_query(text):
                 location = (
@@ -447,7 +459,7 @@ class Sterling:
                     if conditions:
                         llm_text = (
                             f"{text}\n\n"
-                            f"[Use only the following data to answer — do not guess or add details: "
+                            f"[Use only the following data to answer - do not guess or add details: "
                             f"{conditions}]"
                         )
                         logger.info(f"Weather context injected for: {location}")
@@ -473,7 +485,7 @@ class Sterling:
                 )
 
             if was_interrupted:
-                logger.info("Wake word interrupt — discarding partial response, listening again.")
+                logger.info("Wake word interrupt - discarding partial response, listening again.")
                 continue
 
             if full_response:
@@ -485,9 +497,9 @@ class Sterling:
                 f"{self._memory.turn_count} turns]"
             )
 
-            # TTS has finished — safe to return to wake word now
+            # TTS has finished - safe to return to wake word now
             if winding_down:
-                logger.info("Conversation wound down — returning to wake word.")
+                logger.info("Conversation wound down - returning to wake word.")
                 break
         finally:
             self._recorder.close_stream()
@@ -597,7 +609,7 @@ class Sterling:
         Run a TTS call with wake word interruption support.
 
         Swaps the microphone from the recorder to the wake word detector
-        for the duration of playback — the only safe way to run both
+        for the duration of playback - the only safe way to run both
         wake word detection and recording without CoreAudio conflicts.
 
         A background thread calls wake_word.listen() in a loop. If the
@@ -606,8 +618,8 @@ class Sterling:
 
         Returns:
             (result, was_interrupted)
-            result         — return value of speak_func (str for speak_streaming, None for speak)
-            was_interrupted — True if wake word cut the speech short
+            result         - return value of speak_func (str for speak_streaming, None for speak)
+            was_interrupted - True if wake word cut the speech short
         """
         import threading
 
@@ -621,8 +633,10 @@ class Sterling:
         def _monitor():
             while not stop_event.is_set():
                 try:
-                    if self._wake_word.listen():
-                        logger.info("Wake word detected mid-speech — interrupting.")
+                    # Pass stop_event so listen() skips Whisper transcription
+                    # (~200 ms) once we've signalled stop - exits in ~32 ms instead.
+                    if self._wake_word.listen(stop_event=stop_event):
+                        logger.info("Wake word detected mid-speech - interrupting.")
                         interrupted.set()
                         stop_event.set()
                 except Exception as e:
@@ -635,10 +649,10 @@ class Sterling:
         try:
             result = speak_func(*args, stop_event=stop_event)
         finally:
-            stop_event.set()              # stop monitor if TTS finished naturally
-            monitor.join(timeout=2.0)
-            self._wake_word.pause()       # hand mic back
-            self._recorder.open_stream()
+            stop_event.set()              # tell monitor: skip transcription, exit loop
+            monitor.join(timeout=0.5)     # wait ~32 ms (listen() skips Whisper when stop set)
+            self._wake_word.pause()       # ONLY close wake stream after monitor has exited
+            self._recorder.open_stream()  # one input stream at a time — always safe here
 
         return result, interrupted.is_set()
 
@@ -685,7 +699,7 @@ class Sterling:
         if any(p in t for p in ("previous song", "previous track", "go back", "last song")):
             return {"action": "previous"}
 
-        # Volume set — "set volume to 50" / "volume at 40 percent"
+        # Volume set - "set volume to 50" / "volume at 40 percent"
         vol_match = re.search(r'volume.*?(\d+)|set.*?volume.*(\d+)|(\d+).*?volume', t)
         if vol_match:
             val = next(v for v in vol_match.groups() if v is not None)
@@ -697,7 +711,7 @@ class Sterling:
         if any(p in t for p in ("volume down", "quieter", "turn it down", "turn down the music")):
             return {"action": "volume_down"}
 
-        # Play [query] — extract what comes after "play"
+        # Play [query] - extract what comes after "play"
         if "play" in t:
             # Strip filler so "play some music" doesn't search for "some music"
             filler = ("some music", "something", "music", "a song", "anything", "spotify")
@@ -779,7 +793,7 @@ class Sterling:
         if not any(w in t for w in project_words):
             return None
 
-        # Detect language — default to Python
+        # Detect language - default to Python
         language = "python"
         for alias, lang in LANGUAGE_ALIASES.items():
             if alias in t:
@@ -839,7 +853,7 @@ class Sterling:
     def _generate_code(self, language: str, description: str) -> str:
         """
         Ask the LLM to write code for the given language and description.
-        Uses a dedicated code-generation prompt — overrides the normal system prompt.
+        Uses a dedicated code-generation prompt - overrides the normal system prompt.
         """
         messages = [
             {
@@ -888,7 +902,7 @@ class Sterling:
         """
         Returns True if the user is wrapping up the conversation.
         Sterling will still respond via LLM, then return to wake word mode
-        once TTS has finished — so Sterling always gets to say goodbye first.
+        once TTS has finished - so Sterling always gets to say goodbye first.
         """
         t = text.lower()
         return any(phrase in t for phrase in [
@@ -1060,7 +1074,7 @@ class Sterling:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Sterling — AI Room Assistant",
+        description="Sterling - AI Room Assistant",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -1089,11 +1103,18 @@ def main():
         enable_vision=not args.no_vision,
     )
 
-    # Backup signal handler — the run() loop catches KeyboardInterrupt itself,
+    # Backup signal handler - the run() loop catches KeyboardInterrupt itself,
     # but this fires if the signal lands outside the join() window.
     def handle_sigint(signum, frame):
         print()
-        sterling._running = False
+        # Save memory then force-exit immediately.
+        # PyAudio's Pa_StopStream can deadlock on macOS if we wait for
+        # the graceful shutdown path — os._exit bypasses that entirely.
+        try:
+            sterling._memory.end_session()
+        except Exception:
+            pass
+        os._exit(0)
 
     signal.signal(signal.SIGINT, handle_sigint)
 

@@ -65,7 +65,7 @@ class ChromaMemory:
                 f"at '{persist_dir}'"
             )
         except Exception as e:
-            logger.error(f"ChromaDB init failed: {e}")
+            logger.warning(f"ChromaDB init failed: {e}")
             raise
 
     def add(self, user_msg: str, assistant_msg: str, session_id: str):

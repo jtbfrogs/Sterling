@@ -234,11 +234,17 @@ class WakeWordDetector:
     # Detection — called in a tight loop from main.py
     # ─────────────────────────────────────────────────────────────────────────
 
-    def listen(self) -> bool:
+    def listen(self, stop_event=None) -> bool:
         """
         Read one 32 ms audio chunk and advance the VAD state machine.
         When enough speech has been accumulated and silence detected,
         transcribes with Whisper and checks for wake phrases.
+
+        Args:
+            stop_event: Optional threading.Event. When set, the method skips
+                        the expensive Whisper transcription and returns False
+                        immediately — lets the caller exit in ~32 ms instead
+                        of waiting up to 200 ms for a transcription to finish.
 
         Returns:
             True  — wake phrase detected.
@@ -276,6 +282,11 @@ class WakeWordDetector:
             )
 
             if should_transcribe:
+                # If the caller has signalled stop, skip the ~200 ms Whisper
+                # transcription — the result doesn't matter any more.
+                if stop_event is not None and stop_event.is_set():
+                    self._reset_state()
+                    return False
                 detected = self._transcribe_and_check()
                 self._reset_state()
                 return detected

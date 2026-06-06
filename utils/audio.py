@@ -167,7 +167,12 @@ class AudioRecorder:
 
         try:
             while True:
-                raw    = stream.read(self.chunk_size, exception_on_overflow=False)
+                try:
+                    raw = stream.read(self.chunk_size, exception_on_overflow=False)
+                except OSError:
+                    # Stream closed externally (e.g. shutdown) — bail out cleanly
+                    return None
+
                 energy = self._rms_energy(raw)
                 total_chunks += 1
 
@@ -190,8 +195,11 @@ class AudioRecorder:
         finally:
             # Only close if we opened a temporary stream
             if own_stream:
-                stream.stop_stream()
-                stream.close()
+                try:
+                    stream.stop_stream()
+                    stream.close()
+                except Exception:
+                    pass
 
         if not frames:
             return None
@@ -201,6 +209,7 @@ class AudioRecorder:
 
     def terminate(self):
         """Release PyAudio resources. Call on shutdown."""
+        self.close_stream()  # must close stream before terminating PyAudio
         self._pa.terminate()
         logger.debug("AudioRecorder terminated.")
 

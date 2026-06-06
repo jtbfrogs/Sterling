@@ -41,6 +41,12 @@ logger = setup_logger("sterling.vision.webcam")
 # ─────────────────────────────────────────────────────────────────────────────
 
 try:
+    import logging as _logging
+    import os as _os
+    # Silence ultralytics INFO chatter (model summary, benchmark lines, etc.)
+    _logging.getLogger("ultralytics").setLevel(_logging.WARNING)
+    # Suppress ultralytics settings sync and telemetry on import
+    _os.environ.setdefault("YOLO_VERBOSE", "False")
     from ultralytics import YOLO as _YOLO
     YOLO_AVAILABLE = True
 except ImportError:
