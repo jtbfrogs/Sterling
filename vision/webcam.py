@@ -1,8 +1,7 @@
 """
-Sterling Vision — USB Webcam Backend
-======================================
+Sterling Vision — USB Webcam
+==============================
 YOLOv8 object/person detection + face_recognition for face ID.
-Drop-in replacement for core/vision.py (HuskyLens2 backend).
 
 Face Enrollment
 ---------------
@@ -104,7 +103,7 @@ class Block:
 class WebcamVision:
     """
     USB webcam vision using YOLOv8 + face_recognition.
-    Exposes the same interface as core/vision.HuskyLens.
+    Configured via config.yaml under the vision section.
 
     Usage:
         cam = WebcamVision(device_index=0)
@@ -211,11 +210,11 @@ class WebcamVision:
         )
 
     def switch_algorithm(self, algorithm: int):
-        """No-op — included for interface compatibility with HuskyLens."""
+        """No-op — included for interface compatibility."""
         pass
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Detection API — matches HuskyLens interface
+    # Detection API
     # ─────────────────────────────────────────────────────────────────────────
 
     def get_all(self) -> tuple[list[Block], list]:

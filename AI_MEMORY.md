@@ -22,7 +22,7 @@
 | Lights | Govee cloud HTTP API (api_key + device_id + model/SKU) |
 | Music | Spotify Web API via spotipy (Premium required for playback control) |
 | Weather | wttr.in — no API key, free, supports any location on the fly |
-| Vision | HuskyLens2 USB-Serial (UART 9600 baud) |
+| Vision | USB webcam + YOLOv8 + face_recognition (vision/webcam.py) |
 | Audio | PyAudio + energy-based VAD |
 | Config | `config.yaml` (gitignored — has API keys) |
 
@@ -37,7 +37,10 @@ core/llm.py                ← Ollama client (chat + stream)
 core/tts.py                ← Edge-TTS sentence-streaming + stop_event interruption
 core/memory.py             ← session window + ChromaDB semantic recall + JSON archive
 core/workspace.py          ← project scaffolding (Python/C/C++/JS/Rust/Go/Bash) + LLM code gen
-core/vision.py             ← HuskyLens2 binary UART protocol
+vision/__init__.py         ← vision package
+vision/webcam.py           ← WebcamVision — YOLO detection + face_recognition enrollment
+vision/faces/              ← drop named photos here to enrol faces
+vision/webcam.py           ← WebcamVision — YOLO detection + face_recognition (see above)
 core/govee.py              ← GoveeCloud (HTTP) + GoveeLocal (UDP) — same interface
 core/spotify.py            ← Spotify Web API via spotipy (play/pause/skip/volume/search)
 utils/audio.py             ← VAD recorder
@@ -113,7 +116,7 @@ README.md                  ← up-to-date quick-start + voice command reference
 - [ ] Check Jetson Orin Nano RAM: `free -h` — 4GB or 8GB determines LLM model choice
 - [ ] Jetson migration: flash JetPack 6, install Ollama ARM build, swap TTS to Piper
 - [ ] Consider removing `"ling"` from wake phrases if false triggers happen
-- [ ] Verify HuskyLens2 ping works (protocol fix deployed, untested on hardware)
+- [ ] Test webcam vision end-to-end (install ultralytics + dlib + face_recognition first)
 - [ ] ChromaDB long-term memory (semantic search — v2)
 - [ ] Voice notes feature (easy win — append to notes.md)
 - [ ] Morning briefing command

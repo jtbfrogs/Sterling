@@ -28,7 +28,6 @@ from core.stt import STT
 from core.llm import LLM
 from core.tts import TTS
 from core.memory import Memory
-from core.vision import HuskyLens, ALGORITHM_FACE_RECOGNITION
 from vision.webcam import WebcamVision
 from core.govee import GoveeCloud, GoveeLocal, COLORS
 from core.spotify import Spotify
@@ -199,51 +198,27 @@ class Sterling:
 
     def _init_vision(self, enable: bool):
         self._vision = None
-        self._face_map: dict = {}
         vision_cfg = self._config.get("vision", {})
 
         if not enable or not vision_cfg.get("enabled", False):
             logger.info("  Vision disabled (set vision.enabled: true in config to activate)")
             return
 
-        backend = vision_cfg.get("backend", "huskylens").lower()
-
-        if backend == "webcam":
-            try:
-                cam = WebcamVision(
-                    device_index      = vision_cfg.get("device_index", 0),
-                    model_size        = vision_cfg.get("yolo_model", "yolov8n.pt"),
-                    face_recognition  = vision_cfg.get("face_recognition", True),
-                    known_faces_dir   = vision_cfg.get("known_faces_dir", "vision/faces"),
-                    confidence_thresh = vision_cfg.get("confidence_thresh", 0.45),
-                )
-                cam.start()
-                cam.startup_scan()
-                self._vision = cam
-                logger.info("✓ Vision (webcam + YOLO) initialized")
-            except Exception as e:
-                logger.warning(f"  Webcam vision unavailable: {e}")
-
-        else:  # huskylens
-            try:
-                lens = HuskyLens(
-                    port      = vision_cfg.get("port") or None,
-                    baud_rate = vision_cfg.get("baud_rate", 9600),
-                    timeout   = vision_cfg.get("timeout", 1.0),
-                )
-                if not lens.ping():
-                    logger.warning(
-                        "  HuskyLens2 not responding to ping. "
-                        "Check: Settings → Protocol Type → UART on the device."
-                    )
-                lens.switch_algorithm(ALGORITHM_FACE_RECOGNITION)
-                self._face_map = vision_cfg.get("face_map", {})
-                lens.startup_scan(self._face_map)
-                self._vision = lens
-                logger.info("✓ Vision (HuskyLens2) initialized")
-            except Exception as e:
-                logger.warning(f"  HuskyLens2 unavailable: {e}")
-                logger.warning("  Continuing without vision. Check USB connection.")
+        try:
+            cam = WebcamVision(
+                device_index      = vision_cfg.get("device_index", 0),
+                model_size        = vision_cfg.get("yolo_model", "yolov8n.pt"),
+                face_recognition  = vision_cfg.get("face_recognition", True),
+                known_faces_dir   = vision_cfg.get("known_faces_dir", "vision/faces"),
+                confidence_thresh = vision_cfg.get("confidence_thresh", 0.45),
+            )
+            cam.start()
+            cam.startup_scan()
+            self._vision = cam
+            logger.info("✓ Vision (webcam + YOLO) initialized")
+        except Exception as e:
+            logger.warning(f"  Vision unavailable: {e}")
+            logger.warning("  Continuing without vision. Check camera is connected.")
 
     def _init_workspace(self):
         self._workspace: Workspace | None = None
@@ -975,22 +950,17 @@ class Sterling:
             logger.error(f"Light command failed: {e}")
 
     def _report_faces(self):
-        """Report recognised faces from either webcam or HuskyLens backend."""
+        """Report recognised faces from the webcam."""
         try:
             blocks = self._vision.get_learned_blocks()
             if not blocks:
                 self._tts.speak("I don't see anyone I recognise right now.")
                 return
 
-            names = []
-            for block in blocks:
-                # Webcam: label is the enrolled name directly
-                if hasattr(block, "label") and block.label and block.label not in ("person", "unknown", ""):
-                    names.append(block.label)
-                else:
-                    # HuskyLens: map numeric ID to name via face_map
-                    name = self._face_map.get(block.id) or self._face_map.get(str(block.id))
-                    names.append(name if name else "someone I don't recognise")
+            names = [b.label for b in blocks if b.label not in ("person", "unknown", "")]
+            if not names:
+                self._tts.speak("There's someone in frame but I don't recognise them.")
+                return
 
             if len(names) == 1:
                 self._tts.speak(f"I can see {names[0]}.")
@@ -1002,39 +972,27 @@ class Sterling:
             self._tts.speak("Vision system ran into an error.")
 
     def _report_objects(self):
-        """Report all detected objects from either webcam or HuskyLens backend."""
+        """Report all detected objects from the webcam."""
         try:
             blocks, _ = self._vision.get_all()
             if not blocks:
                 self._tts.speak("Nothing in frame at the moment.")
                 return
 
-            # Webcam: blocks have specific labels — give a real description
-            if blocks and hasattr(blocks[0], "label") and blocks[0].label:
-                from collections import Counter
-                counts = Counter(b.label for b in blocks)
-                parts  = []
-                for label, count in counts.most_common():
-                    if count == 1:
-                        parts.append(f"a {label}")
-                    else:
-                        plural = label + "s" if not label.endswith("s") else label
-                        parts.append(f"{count} {plural}")
-                if len(parts) == 1:
-                    self._tts.speak(f"I can see {parts[0]}.")
+            from collections import Counter
+            counts = Counter(b.label for b in blocks)
+            parts  = []
+            for label, count in counts.most_common():
+                if count == 1:
+                    parts.append(f"a {label}")
                 else:
-                    self._tts.speak(f"I can see {', '.join(parts[:-1])} and {parts[-1]}.")
-                return
+                    plural = label + "s" if not label.endswith("s") else label
+                    parts.append(f"{count} {plural}")
 
-            # HuskyLens fallback: learned vs unknown count
-            learned = [b for b in blocks if b.is_learned]
-            unknown = [b for b in blocks if not b.is_learned]
-            parts   = []
-            if learned:
-                parts.append(f"{len(learned)} recognised {'object' if len(learned) == 1 else 'objects'}")
-            if unknown:
-                parts.append(f"{len(unknown)} unrecognised {'item' if len(unknown) == 1 else 'items'}")
-            self._tts.speak(f"Detecting {' and '.join(parts)} in frame.")
+            if len(parts) == 1:
+                self._tts.speak(f"I can see {parts[0]}.")
+            else:
+                self._tts.speak(f"I can see {', '.join(parts[:-1])} and {parts[-1]}.")
 
         except Exception as e:
             logger.error(f"Vision query failed: {e}")
@@ -1091,7 +1049,7 @@ def parse_args() -> argparse.Namespace:
 Examples:
   python main.py                          # Run with default config.yaml
   python main.py --config dev.yaml        # Use a different config file
-  python main.py --no-vision              # Disable HuskyLens2 vision
+  python main.py --no-vision              # Disable webcam vision
         """,
     )
     parser.add_argument(
@@ -1100,7 +1058,7 @@ Examples:
     )
     parser.add_argument(
         "--no-vision", action="store_true",
-        help="Disable HuskyLens2 vision module regardless of config"
+        help="Disable vision regardless of config"
     )
     return parser.parse_args()
 

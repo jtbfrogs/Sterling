@@ -70,7 +70,7 @@ Think less "smart speaker" and more **digital co-pilot**:
 │  └───────────────────────────────────────────────────────────┘  │
 │                                                                   │
 │  ┌─────────────────────┐    USB/UART    ┌──────────────────────┐ │
-│  │   HuskyLens2 Vision │◀──────────────▶│   Vision Module      │ │
+│  │   USB Webcam + YOLO │◀──────────────▶│   Vision Module      │ │
 │  │   (Face/Object Det.)│               │  (sterling/core/)    │ │
 │  └─────────────────────┘               └──────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
@@ -222,31 +222,30 @@ bullet points, and special characters that would sound odd when spoken.
 
 ---
 
-### 3.5 Vision System — HuskyLens2
+### 3.5 Vision System — USB Webcam + YOLO
 
 | Property | Value |
 |---|---|
-| Hardware | HuskyLens2 (DFRobot) |
-| Connection | USB-Serial (UART at 9600 baud) |
-| Library | `pyserial` + custom protocol handler |
-| Modes | Face Recognition, Object Tracking, Object Recognition, Color Recognition |
-| Offline | ✅ 100% local (runs on-device) |
+| Hardware | Any USB webcam |
+| Connection | USB Video (UVC) |
+| Library | `ultralytics` (YOLO) + `face_recognition` |
+| Modes | Object detection (80 COCO classes), Face recognition |
+| Offline | ✅ 100% local |
 
-HuskyLens2 is a standalone AI vision camera with an onboard RISC-V processor running trained
-neural networks for face recognition, object detection, and more. It communicates over UART
-using a binary protocol.
+Sterling uses a standard USB webcam with YOLOv8 for real-time object and person detection,
+and the face_recognition library for identifying enrolled faces.
 
 **Sterling Vision Features:**
-- **Face recognition:** Identify registered faces and greet users by name
+- **Face recognition:** Identify enrolled faces and greet users by name
+- **Object detection:** 80+ COCO classes — laptop, phone, cup, person, etc.
 - **Presence detection:** Detect when someone enters/leaves the room
-- **Object awareness:** Identify items being held up to the camera ("What is this?")
-- **Stranger detection:** Alert when an unrecognized face is detected
+- **Stranger detection:** Unrecognised faces get labelled as "unknown"
 
-**HuskyLens2 Setup:**
-1. Connect via USB to Mac
-2. Set communication mode to UART in HuskyLens2 settings
-3. Train faces using the HuskyLens2 button interface
-4. Sterling reads the labels and translates IDs to names via `config.yaml`
+**Vision Setup:**
+1. Connect a USB webcam
+2. Install: `brew install cmake && pip install dlib ultralytics opencv-python face_recognition`
+3. Set `vision.enabled: true` in `config.yaml`
+4. Enrol faces: drop a named photo into `vision/faces/` (e.g. `vision/faces/jtb.jpg`), restart
 
 ---
 
@@ -312,7 +311,7 @@ said earlier in the session, and can handle:
 
 ### 4.3 Room Assistant
 
-Leveraging the HuskyLens2 and environmental awareness:
+Leveraging the webcam and environmental awareness:
 
 - **Greeting:** Recognizes your face and greets you when you enter the room
 - **Presence:** Tracks who is in the room
@@ -358,7 +357,7 @@ Leveraging the HuskyLens2 and environmental awareness:
 | RAM | 8 GB | ~5.5 GB used at peak |
 | Microphone | Built-in or USB | Any standard mic works |
 | Speaker | Built-in or external | `afplay` uses system default |
-| HuskyLens2 | USB connection | Optional — vision features disabled without it |
+| USB webcam | Any UVC-compatible webcam | Optional — vision disabled without it |
 | Internet | For TTS only | Edge-TTS requires network; `say` fallback is offline |
 | Storage | ~3 GB free | For models (Whisper base ~580 MB, Llama 3.2 ~2.5 GB) |
 | macOS | 12 Monterey+ | Required for Metal + latest Python |
@@ -459,19 +458,20 @@ python main.py
 
 ---
 
-### HuskyLens2 Setup (Optional)
+### Vision Setup (Webcam + YOLO)
 
-1. Connect HuskyLens2 to Mac via USB-C or USB-A adapter
-2. On HuskyLens2: `Settings → Protocol Type → UART`
-3. Set baud rate to `9600` on the device
-4. Find the serial port:
+1. Connect a USB webcam
+2. Install dependencies:
    ```bash
-   ls /dev/tty.usb*
-   # Will show something like /dev/tty.usbserial-140
+   brew install cmake
+   pip install dlib ultralytics opencv-python face_recognition
    ```
-5. Set `vision.port` in `config.yaml` to that path (or leave blank for auto-detect)
-6. Train faces: Hold the HuskyLens2 button to learn a face, assign an ID
-7. Map IDs to names in `config.yaml` under `vision.face_map`
+3. Set `vision.enabled: true` in `config.yaml`
+4. To enrol faces, drop a named photo into `vision/faces/`:
+   ```
+   vision/faces/jtb.jpg   → recognised as "jtb"
+   ```
+5. Restart Sterling — face encodings load at startup
 
 ---
 
@@ -519,9 +519,8 @@ vision:
   enabled: true
   port: null                   # null = auto-detect
   baud_rate: 9600
-  face_map:                    # Map HuskyLens face IDs to names
-    1: "Tony"
-    2: "Pepper"
+  known_faces_dir: "vision/faces"  # Drop named photos here to enrol faces
+  confidence_thresh: 0.45
 
 memory:
   max_history: 20              # Max conversation turns to keep
@@ -576,7 +575,7 @@ Sterling will say **"Sterling online. How may I assist you?"** and begin listeni
 | "Goodbye" / "Shut down" / "Power off" | Graceful shutdown |
 | "What do you see?" | Reports vision module observations |
 | "Who's in the room?" | Reports detected faces (if vision enabled) |
-| "What is this?" | Identifies object shown to HuskyLens2 |
+| "What is this?" | Identifies object in webcam frame |
 | "That's all, thank you" | Closes conversation gracefully |
 
 All other speech is processed as a natural language request to the LLM.
@@ -604,7 +603,7 @@ sterling/
 │   ├── stt.py                   ← Faster-Whisper speech-to-text
 │   ├── llm.py                   ← Ollama LLM client
 │   ├── tts.py                   ← Edge-TTS + macOS say fallback
-│   ├── vision.py                ← HuskyLens2 UART interface
+│   ├── vision/webcam.py         ← USB webcam + YOLO + face_recognition
 │   └── memory.py                ← Conversation context management
 │
 ├── utils/                       ← Utility modules
@@ -726,7 +725,7 @@ Edit `prompts/system_prompt.txt` to adjust:
 | TTS requires internet | Edge-TTS streams from Microsoft servers; `say` fallback is offline but lower quality |
 | 8 GB RAM is tight | No room for larger models; Llama 3.2 3B is the practical limit |
 | No persistent memory (yet) | Memory clears on restart; ChromaDB integration is planned |
-| HuskyLens2 face training | Must be done manually via physical button — cannot train via voice |
+| Face enrollment | Drop a photo in vision/faces/ and restart Sterling |
 | No real-time interruption | Sterling cannot be interrupted mid-response (planned improvement) |
 | STT accuracy | Accents, background noise, and fast speech can reduce accuracy |
 | Wake word false positives | Porcupine occasionally triggers on similar-sounding words |
@@ -741,7 +740,7 @@ Edit `prompts/system_prompt.txt` to adjust:
 - [x] Speech-to-text pipeline
 - [x] Ollama LLM integration
 - [x] Neural TTS (Edge-TTS)
-- [x] HuskyLens2 vision interface
+- [x] USB webcam vision (YOLO + face_recognition)
 - [x] Session memory
 - [x] Sentence-streaming TTS
 

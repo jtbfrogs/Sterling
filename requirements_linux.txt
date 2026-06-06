@@ -44,9 +44,10 @@ edge-tts>=6.1.0
 pyaudio>=0.2.14
 numpy>=1.24.0
 
-# --- Vision ---
-pyserial>=3.5
-# ultralytics>=8.3.0    # YOLO v11 — uncomment for webcam vision
+# --- Vision (Webcam + YOLO) ---
+ultralytics>=8.0.0
+opencv-python>=4.8.0
+# face_recognition: pip install dlib face_recognition  (dlib uses CUDA on Jetson automatically)
 
 # --- Long-term Memory (planned) ---
 # chromadb>=0.5.0

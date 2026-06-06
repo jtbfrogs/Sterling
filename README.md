@@ -17,7 +17,7 @@ ollama serve &
 
 # 3. Launch
 python main.py
-python main.py --no-vision    # if HuskyLens2 isn't connected
+python main.py --no-vision    # if camera isn't connected
 ```
 
 Say **"Hey Sterling"** → wait for *"Yes?"* → speak your request.
@@ -28,7 +28,7 @@ Say **"Hey Sterling"** → wait for *"Yes?"* → speak your request.
 
 - **Conversation** — project help, debugging, brainstorming, general knowledge
 - **Smart wind-down** — say *"goodbye"*, *"I'm done"*, or *"talk later"* and Sterling says goodbye then goes back to listening
-- **Room awareness** — face recognition and object detection via HuskyLens2
+- **Room awareness** — face recognition and object detection via USB webcam + YOLO
 - **Control Govee lights** — on/off, colors, brightness, mid-conversation
 - **Spotify control** — play, pause, skip, volume, search by artist or song
 - **Weather** — current conditions and two-day forecast, any location
@@ -69,13 +69,29 @@ Say **"Hey Sterling"** → wait for *"Yes?"* → speak your request.
 | Smart Lights | Govee cloud API |
 | Music | Spotify Web API (spotipy) |
 | Weather | wttr.in (no API key) |
-| Vision | HuskyLens2 via USB-Serial |
+| Vision | USB webcam + YOLOv8 + face_recognition |
 | Memory | JSON (session + persistent cross-session recall) |
 | Platform | M1 Mac, Python 3.11, Metal GPU |
 
 ---
 
 ## Setup — Integrations
+
+### Vision (Webcam + YOLO)
+```bash
+# Install deps
+brew install cmake          # M1 Mac only — needed for dlib
+source ster/bin/activate
+pip install ultralytics opencv-python
+pip install dlib face_recognition   # optional — enables face ID
+```
+
+Set `vision.enabled: true` in `config.yaml`. To enrol faces, drop a named photo into `vision/faces/`:
+```
+vision/faces/jtb.jpg    → Sterling will say "I can see jtb"
+```
+
+---
 
 ### Govee Lights
 ```bash
@@ -114,7 +130,7 @@ Key sections in `config.yaml`:
 | `govee` | API key and device list |
 | `spotify` | Client credentials |
 | `weather` | Default location |
-| `vision` | HuskyLens2 port and face map |
+| `vision` | Camera index, YOLO model, face enrollment directory |
 | `memory` | History size, persistence, cross-session recall |
 | `conversation` | Idle timeout, sleep message |
 
@@ -124,7 +140,7 @@ Key sections in `config.yaml`:
 
 ```bash
 python main.py                      # Default
-python main.py --no-vision          # Skip HuskyLens2 initialisation
+python main.py --no-vision          # Skip vision initialisation
 python main.py --config dev.yaml    # Use alternate config file
 ```
 

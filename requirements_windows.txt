@@ -36,9 +36,11 @@ edge-tts>=6.1.0
 pyaudio>=0.2.14
 numpy>=1.24.0
 
-# --- Vision (HuskyLens2 + future YOLO) ---
-pyserial>=3.5
-# ultralytics>=8.3.0     # YOLO v11 — uncomment when webcam vision is added
+# --- Vision (Webcam + YOLO) ---
+ultralytics>=8.0.0
+opencv-python>=4.8.0
+# face_recognition requires dlib — pre-built wheel usually works on Windows:
+#   pip install dlib face_recognition
 
 # --- Long-term Memory (planned) ---
 # chromadb>=0.5.0

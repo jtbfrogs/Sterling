@@ -28,7 +28,7 @@
 | **STT Model** | Whisper Base | Whisper Large-v3 | Whisper Base/Small | Whisper Large-v3 |
 | **TTS** | Edge-TTS + `say` | Kokoro (offline) | **Piper** (offline) | Piper / Coqui XTTS |
 | **TTS Offline** | Partial | ✅ Full | ✅ Full | ✅ Full |
-| **Vision** | HuskyLens2 | HuskyLens2 + YOLO | HuskyLens2 + YOLO | HuskyLens2 + YOLO |
+| **Vision** | Webcam (YOLO) | Webcam + YOLO | Webcam + YOLO | Webcam + YOLO |
 | **Long-term Memory** | Planned | ChromaDB | ChromaDB | ChromaDB |
 | **Home Automation** | Govee ✅ | Govee + more | Govee + more | Home Assistant |
 | **Always-On** | Manual | Windows Service | systemd (24/7) | systemd / Docker |
@@ -44,7 +44,7 @@ The RTX 3060 (12 GB VRAM) fundamentally changes what Sterling can do. CUDA accel
 - **Larger LLMs** — Llama 3.1 8B or even 70B (Q4 quantized) running fast
 - **Better STT** — Whisper Large-v3 for near-perfect transcription
 - **Fully offline TTS** — Kokoro runs locally at Edge-TTS quality or better
-- **Real-time vision** — YOLO v8/v11 on GPU alongside HuskyLens2
+- **Real-time vision** — YOLO v8/v11 on GPU alongside Webcam (YOLO)
 
 ### Upgraded Stack
 
@@ -53,7 +53,7 @@ The RTX 3060 (12 GB VRAM) fundamentally changes what Sterling can do. CUDA accel
 | LLM | Llama 3.2 3B | Llama 3.1 8B (CUDA) |
 | STT | Whisper Base (CPU) | Whisper Large-v3 (CUDA) |
 | TTS | Edge-TTS (online) | Kokoro-82M (offline) |
-| Vision | HuskyLens2 | HuskyLens2 + YOLO webcam |
+| Vision | Webcam (YOLO) | Webcam + YOLO webcam |
 | Memory | Session JSON | ChromaDB long-term |
 
 ### VRAM Budget
@@ -288,7 +288,7 @@ TP-Link Kasa plugs have a local LAN API (no cloud required — same approach as 
 Live via wttr.in — current conditions + two-day forecast with precip %, any location on the fly.
 
 **Security / Presence Mode**
-When you leave: "Sterling, watch the room." → HuskyLens2 / YOLO monitors for motion/faces.
+When you leave: "Sterling, watch the room." → Webcam (YOLO) / YOLO monitors for motion/faces.
 Sends a desktop notification or speaks an alert if someone enters.
 "Sterling, who came in while I was gone?" → reviews the detection log.
 
@@ -356,30 +356,14 @@ summarises at the end. "Sterling, what did we agree on?" → LLM summary of the 
 
 ## 7. Vision Upgrade — USB Webcam + YOLO + Face Recognition
 
-Replaces the HuskyLens2 with a standard USB webcam running YOLO for object/person detection
-and the `face_recognition` library for identifying specific people. More capable, no proprietary
-hardware, works on every platform Sterling runs on.
-
----
-
-### Why Replace HuskyLens
-
-| | HuskyLens2 | USB Webcam + YOLO |
-|---|---|---|
-| Person detection | ✅ | ✅ much better |
-| Object detection | Limited | ✅ 80+ COCO classes |
-| Face recognition | ✅ on-device | ✅ via face_recognition lib |
-| Hardware | Proprietary lens | Any USB webcam |
-| Face enrollment | Physical button | Photos in a folder |
-| Connectivity | USB Serial / UART | USB Video (UVC) |
-| Platform support | Limited | Universal |
+USB webcam + YOLO + face_recognition. Now the live implementation in `vision/webcam.py`.
+This section documents the full feature and platform-specific setup notes.
 
 ---
 
 ### Architecture
 
-HuskyLens is queried on-demand (ask → reply). A webcam needs a background
-capture thread keeping the latest frame in memory so queries are instant:
+The webcam runs a background capture thread keeping the latest frame in memory so queries are instant:
 
 ```
 Background thread:  cv2.VideoCapture → latest_frame (always fresh)
@@ -392,7 +376,7 @@ so `main.py` requires zero changes. A config flag picks the backend:
 
 ```yaml
 vision:
-  backend: "webcam"        # webcam | huskylens
+  backend is now always webcam — no config needed
   device_index: 0          # USB camera index (0 = first camera)
   yolo_model: "yolov8n.pt" # nano = fastest | yolov8s = more accurate
   face_recognition: true
@@ -481,13 +465,11 @@ Recommendation: `yolov8n` on M1 Mac and Jetson Nano, `yolov8s` on Jetson Orin / 
 ### Files to Create / Modify
 
 ```
-core/vision_webcam.py     ← NEW — WebcamVision class (same interface as HuskyLens)
-faces/                    ← NEW — folder for face enrollment photos
-main.py                   ← small change in _init_vision() to pick backend from config
-requirements_mac.txt      ← add ultralytics, opencv-python, face_recognition
-requirements_windows.txt  ← same
-requirements_linux.txt    ← same
-config.yaml.example       ← add vision.backend, device_index, yolo_model, known_faces_dir
+vision/webcam.py          ✅ live
+vision/faces/             ✅ live — drop named photos here
+main.py _init_vision()    ✅ updated
+requirements_*.txt        ✅ updated
+config.yaml               ✅ updated
 ```
 
 ---

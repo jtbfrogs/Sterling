@@ -26,9 +26,6 @@ edge-tts>=6.1.0
 pyaudio>=0.2.14
 numpy>=1.24.0
 
-# --- Vision (HuskyLens2) ---
-pyserial>=3.5
-
 # --- Vision (Webcam + YOLO) ---
 ultralytics>=8.0.0
 opencv-python>=4.8.0

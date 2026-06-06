@@ -82,11 +82,11 @@ govee:
 
 vision:
   enabled: false
-  port: null
-  baud_rate: 9600
-  timeout: 1.0
-  face_map:
-    1: "User"
+  device_index: 0               # USB camera index (0 = first USB cam)
+  yolo_model: "yolov8n.pt"      # yolov8n=fastest | yolov8s=more accurate
+  face_recognition: true        # Requires face_recognition + dlib (see README)
+  known_faces_dir: "vision/faces"  # Drop named JPGs here to enrol faces
+  confidence_thresh: 0.45       # Min YOLO detection confidence (0.0–1.0)
 
 conversation:
   # Seconds of silence after Sterling responds before it goes back to sleep.
