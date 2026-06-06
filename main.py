@@ -314,7 +314,11 @@ class Sterling:
         )
         self._tts.speak(startup_msg)
 
-        self._wake_word.start()
+        # Enable shared audio stream: one persistent CoreAudio input for the
+        # entire session.  Wake-word detection and recording take turns reading
+        # from it sequentially — no open/close, no two-stream conflict (err=-50).
+        self._recorder.enable_shared_mode()
+        self._wake_word.start(external_read=self._recorder.read_raw)
         logger.info("Listening for wake word...")
         logger.info("-" * 60)
 

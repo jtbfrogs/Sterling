@@ -9,7 +9,6 @@ wake_word:
     - "hey sterling"    # most reliable — two distinct words
     - "sterling"        # solid single-word trigger
     - "ster"            # short variant
-    - "ling"            # note: also a substring of 'darling' — remove if noisy
   # Whisper model for wake detection: tiny (fast) or base (more accurate)
   model_size: "tiny"
   # RMS energy threshold — raise if background noise causes false triggers

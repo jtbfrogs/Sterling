@@ -49,6 +49,7 @@ class AudioRecorder:
 
         self._pa     = pyaudio.PyAudio()
         self._stream = None   # persistent stream; opened by open_stream()
+        self._shared = False  # when True, close_stream() is a no-op (stream owned for life)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Public API
@@ -110,12 +111,46 @@ class AudioRecorder:
         raw_audio = np.frombuffer(b"".join(frames), dtype=np.int16)
         return raw_audio.astype(np.float32) / 32768.0
 
+    def enable_shared_mode(self):
+        """
+        Open the stream once at startup and keep it permanently active.
+        Both the recorder and wake-word detector read from the same stream
+        sequentially — eliminates CoreAudio err=-50 from two simultaneous
+        input streams and removes all stream-switching latency.
+        close_stream() / open_stream() become no-ops; terminate() closes.
+        """
+        self._shared = True
+        if self._stream is None:
+            self._stream = self._pa.open(
+                format=pyaudio.paInt16,
+                channels=self.channels,
+                rate=self.sample_rate,
+                input=True,
+                frames_per_buffer=self.chunk_size,
+            )
+            logger.debug("Shared audio stream opened.")
+
+    def read_raw(self, n_frames: int) -> bytes:
+        """
+        Read n_frames of raw int16 audio from the persistent stream.
+        Used by the wake-word detector when in shared-stream mode.
+        Returns silence bytes on any error.
+        """
+        if self._stream is None:
+            return bytes(n_frames * 2)
+        try:
+            return self._stream.read(n_frames, exception_on_overflow=False)
+        except OSError:
+            return bytes(n_frames * 2)
+
     def open_stream(self):
         """
         Start the persistent input stream.
-        First call allocates it; subsequent calls just restart it (~10 ms)
-        instead of destroying and recreating (~200 ms).
+        No-op in shared mode (stream is always active).
+        Otherwise: first call allocates, subsequent calls restart (~10 ms).
         """
+        if self._shared:
+            return   # stream is permanently open
         if self._stream is None:
             self._stream = self._pa.open(
                 format=pyaudio.paInt16,
@@ -131,7 +166,6 @@ class AudioRecorder:
                     self._stream.start_stream()
                     logger.debug("Persistent input stream restarted.")
             except Exception:
-                # Stream in bad state — recreate it
                 try:
                     self._stream.close()
                 except Exception:
@@ -147,9 +181,11 @@ class AudioRecorder:
 
     def close_stream(self):
         """
-        Suspend the persistent stream without destroying it.
-        Uses stop_stream() so open_stream() can restart in ~10 ms.
+        Suspend the stream. No-op in shared mode (stream stays active for
+        wake-word detection). Otherwise stop_stream() for fast restart.
         """
+        if self._shared:
+            return   # never close in shared mode
         if self._stream:
             try:
                 if self._stream.is_active():

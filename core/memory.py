@@ -380,11 +380,28 @@ class Memory:
                 break
 
         recalled = recalled[-(recall_turns * 2):]
+
+        # Wrap recalled turns in a system message so the LLM knows they are
+        # from a past session — NOT the current conversation.  Injecting them
+        # as bare user/assistant turns caused the LLM to treat stale topics
+        # (e.g. a Jarvis discussion days ago) as the active subject.
+        lines = []
         for msg in recalled:
-            self._history.append({"role": msg["role"], "content": msg["content"]})
+            speaker = "User" if msg["role"] == "user" else "Sterling"
+            lines.append(f"{speaker}: {msg['content']}")
+
+        self._history.append({
+            "role": "system",
+            "content": (
+                "The following exchange is from a PREVIOUS session that has already ended. "
+                "Treat it as background context only — do NOT continue it or treat it as "
+                "part of the current conversation.\n\n"
+                + "\n".join(lines)
+            ),
+        })
 
         logger.info(
-            f"Memory: recalled {len(recalled)} recent messages from previous session(s)."
+            f"Memory: recalled {len(recalled)} messages from previous session(s) as background context."
         )
 
     def _trim(self):

@@ -92,9 +92,10 @@ class WakeWordDetector:
         # Whisper model — loaded in start()
         self._model: WhisperModel = None
 
-        # PyAudio stream — opened in start()
-        self._pa     = None
-        self._stream = None
+        # PyAudio stream — opened in start() unless shared-stream mode is used
+        self._pa          = None
+        self._stream      = None
+        self._external_read = None  # callable(n_frames) — set in shared-stream mode
 
         # VAD state machine
         self._state         = "WAITING"   # WAITING | RECORDING
@@ -106,8 +107,18 @@ class WakeWordDetector:
     # Lifecycle
     # ─────────────────────────────────────────────────────────────────────────
 
-    def start(self):
-        """Load the Whisper model and open the microphone stream."""
+    def start(self, external_read=None):
+        """
+        Load the Whisper model.
+
+        Args:
+            external_read: Optional callable(n_frames: int) -> bytes.
+                If provided, the detector reads audio via this function instead
+                of opening its own PyAudio stream.  Pass recorder.read_raw to
+                share the recorder’s persistent stream — one stream for the
+                whole session, no CoreAudio conflicts, zero switching latency.
+        """
+        self._external_read = external_read
         logger.info(
             f"Loading wake word engine — "
             f"model='{self._model_size}', "
@@ -121,14 +132,15 @@ class WakeWordDetector:
         )
         logger.info(f"  Whisper '{self._model_size}' loaded in {time.time()-t0:.1f}s")
 
-        self._pa = pyaudio.PyAudio()
-        self._stream = self._pa.open(
-            rate=_SAMPLE_RATE,
-            channels=1,
-            format=pyaudio.paInt16,
-            input=True,
-            frames_per_buffer=_CHUNK,
-        )
+        if external_read is None:
+            self._pa = pyaudio.PyAudio()
+            self._stream = self._pa.open(
+                rate=_SAMPLE_RATE,
+                channels=1,
+                format=pyaudio.paInt16,
+                input=True,
+                frames_per_buffer=_CHUNK,
+            )
 
         self._reset_state()
         logger.info(
@@ -139,11 +151,10 @@ class WakeWordDetector:
 
     def pause(self):
         """
-        Suspend the audio stream while keeping the Whisper model loaded.
-        Uses stop_stream() instead of close() so resume() can restart it
-        in ~10 ms rather than ~200 ms (no CoreAudio buffer reallocation).
+        Reset VAD state and suspend the stream.
+        In shared-stream mode: VAD reset only (stream stays active for recorder).
         """
-        if self._stream:
+        if self._external_read is None and self._stream:
             try:
                 if self._stream.is_active():
                     self._stream.stop_stream()
@@ -154,10 +165,15 @@ class WakeWordDetector:
 
     def resume(self):
         """
-        Resume the audio stream after pause().
-        Fast path: start_stream() on the existing stream (~10 ms).
-        Fallback: recreate the stream if it was fully closed (e.g. after stop()).
+        Resume detection.
+        In shared-stream mode: VAD reset only.
+        Otherwise: restart stream (fast) or recreate (fallback).
         """
+        if self._external_read is not None:
+            self._reset_state()   # shared stream — always active, just reset VAD
+            logger.debug("Wake word detector resumed (shared stream).")
+            return
+
         if self._stream is not None:
             try:
                 if not self._stream.is_active():
@@ -166,7 +182,6 @@ class WakeWordDetector:
                 logger.debug("Wake word detector resumed.")
                 return
             except Exception:
-                # Stream is in a bad state — fall through to recreate
                 try:
                     self._stream.close()
                 except Exception:
@@ -185,15 +200,23 @@ class WakeWordDetector:
             logger.debug("Wake word detector resumed (stream recreated).")
 
     def stop(self):
-        """Close the audio stream and release all resources."""
-        if self._stream:
-            self._stream.stop_stream()
-            self._stream.close()
+        """Release all resources."""
+        if self._external_read is None:
+            # We own the stream — close it
+            if self._stream:
+                try:
+                    self._stream.stop_stream()
+                    self._stream.close()
+                except Exception:
+                    pass
+                self._stream = None
+            if self._pa:
+                self._pa.terminate()
+                self._pa = None
+        else:
+            # Shared stream — recorder owns it, we just clear our reference
+            self._external_read = None
             self._stream = None
-
-        if self._pa:
-            self._pa.terminate()
-            self._pa = None
 
         self._model = None
         logger.debug("Wake word detector stopped.")
@@ -271,10 +294,17 @@ class WakeWordDetector:
         Raises:
             RuntimeError — if start() has not been called.
         """
-        if self._stream is None or self._model is None:
+        if self._model is None:
             raise RuntimeError("WakeWordDetector.start() must be called before listen().")
+        if self._external_read is None and self._stream is None:
+            raise RuntimeError("WakeWordDetector has no audio source. Call start() first.")
 
-        raw = self._stream.read(_CHUNK, exception_on_overflow=False)
+        if self._external_read is not None:
+            raw = self._external_read(_CHUNK)
+        else:
+            if not self._stream.is_active():
+                return False   # stream paused — nothing to read
+            raw = self._stream.read(_CHUNK, exception_on_overflow=False)
         energy = self._rms(raw)
 
         if self._state == "WAITING":
