@@ -91,6 +91,8 @@ examples/                  ← standalone reference implementations
   - Separate 1024-token code-only LLM prompt for generation
 - ChromaDB context injection explicitly timestamped and labelled as past — prevents LLM treating old exchanges as current
 - Diagnostics command: "run diagnostics" / "system status" → speaks what's online/offline
+- Ctrl+C fix: wake-word loop moved to daemon thread; main thread does `join(timeout=0.5)` so Python
+  can deliver signals — PyAudio's `stream.read()` is a blocking C call that swallows signals on macOS
 
 ---
 
