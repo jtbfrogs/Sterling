@@ -1,0 +1,102 @@
+sterling:
+  name: "Sterling"
+  startup_message: "Sterling online, how can i assist you?"
+  shutdown_message: "Understood. Powering down. Goodbye."
+
+wake_word:
+  # Phrases that trigger Sterling (case-insensitive substring match in transcription)
+  phrases:
+    - "hey sterling"    # most reliable — two distinct words
+    - "sterling"        # solid single-word trigger
+    - "ster"            # short variant
+    - "ling"            # note: also a substring of 'darling' — remove if noisy
+  # Whisper model for wake detection: tiny (fast) or base (more accurate)
+  model_size: "tiny"
+  # RMS energy threshold — raise if background noise causes false triggers
+  energy_threshold: 500
+  # Seconds of silence after speech before transcription fires
+  silence_duration: 0.6
+  # Maximum audio buffer before forcing transcription
+  max_buffer_seconds: 2.5
+
+llm:
+  model: "llama3.2:3b"
+  base_url: "http://localhost:11434"
+  temperature: 0.7
+  context_window: 4096
+  stream: true
+  max_tokens: 150         # Max tokens in the LLM response. Lower = shorter answers (faster TTS).
+                           # 128 = very brief | 150 = casual/concise | 256 = detailed | 512+ = long-form
+
+stt:
+  model: "base"         # tiny | base | small  (base recommended for M1 8GB)
+  language: "en"
+  device: "cpu"         # cpu (M1 optimized via int8)
+  compute_type: "int8"
+
+tts:
+  voice: "en-GB-RyanNeural"    # British male — Jarvis feel. See edge-tts voices list.
+  rate: "+5%"                   # Speed adjustment: -50% to +100%
+  pitch: "-5Hz"                 # Pitch: -50Hz to +50Hz (lower = deeper)
+  fallback_voice: "Alex"        # macOS `say` fallback voice (used when offline)
+
+audio:
+  sample_rate: 16000
+  channels: 1
+  chunk_size: 1024
+  silence_threshold: 500        # RMS energy cutoff — raise if mic is noisy, lower if too sensitive
+  silence_duration: 1.0         # Seconds of silence before recording stops (1.0 = snappier turns)
+  max_recording_seconds: 30     # Safety cap on recording length
+
+workspace:
+  path: "/Users/jtb/src/sterling/SterProjec"   # Where Sterling creates new projects. Never touches files outside this folder.
+
+spotify:
+  enabled: true              # Set to true once you have your developer app credentials
+  client_id: "7e4dea0d56cf49a2a3bf19fdb67f5bf1"               # From developer.spotify.com — create a free app
+  client_secret: "f0ee5d7343284a7a8b5f6ff7563819fa"           # From developer.spotify.com
+  redirect_uri: "http://127.0.0.1:8888/callback"   # Must match what you set in the app dashboard
+  cache_path: ".spotify_cache"                     # Where the OAuth token gets saved locally
+
+weather:
+  location: "Superior, Colorado"   # Default location — you can also just ask "weather in Denver" mid-conversation
+
+govee:
+  enabled: true
+  api_key: "6ac8d3a1-386b-4889-85a2-c5382a906c84"
+  devices:
+    - name: "Bed lights"
+      device_id: "3C:E1:CA:38:32:34:5B:67"
+      model: "H61BE"
+    - name: "TV Backlight 3 Lite"
+      device_id: "6A:F1:DD:99:82:C6:3E:65"
+      model: "H6099"
+  discovery_timeout: 3                               # Only used for local LAN fallback
+
+vision:
+  enabled: true
+  device_index: 0               # USB camera index (0 = first USB cam)
+  yolo_model: "yolov8n.pt"      # yolov8n=fastest | yolov8s=more accurate
+  face_recognition: true        # Requires face_recognition + dlib (see README)
+  known_faces_dir: "vision/faces"  # Drop named JPGs here to enrol faces
+  confidence_thresh: 0.45       # Min YOLO detection confidence (0.0–1.0)
+
+conversation:
+  # Seconds of silence after a response before Sterling goes back to sleep
+  # and requires the wake word again. Set higher for a more patient assistant.
+  timeout: 20
+  sleep_message: "Going quiet. Say my name when you need me."
+
+memory:
+  max_history: 10               # Max conversation turns to keep in the active session window
+  persist: true                 # Save every message to memory.json with timestamps
+  memory_file: "memory.json"    # Path to the JSON memory file (gitignored)
+  recall_turns: 2               # Recent turns to anchor from last session (ChromaDB handles deeper recall)
+  chroma_enabled: true          # Semantic long-term memory via ChromaDB
+  chroma_path: ".chroma"        # Where ChromaDB stores its files (gitignored)
+  chroma_results: 3             # How many relevant past exchanges to inject per LLM call
+
+logging:
+  level: "INFO"                 # DEBUG | INFO | WARNING | ERROR
+  file: "sterling.log"          # Set to null to disable file logging
+  console: true
