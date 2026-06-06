@@ -308,18 +308,35 @@ class Sterling:
         self._tts.speak(startup_msg)
 
         self._wake_word.start()
-        logger.info(f"Listening for wake word...")
+        logger.info("Listening for wake word...")
         logger.info("-" * 60)
 
-        try:
-            while self._running:
-                if self._wake_word.listen():
-                    self._handle_interaction()
+        # Run the blocking wake-word loop in a daemon thread.
+        # PyAudio's stream.read() is a blocking C call — on macOS it swallows
+        # Ctrl+C because Python only delivers signals between bytecode instructions,
+        # not during C extension calls. Keeping the main thread in a Python-level
+        # join(timeout) loop means Ctrl+C always gets through.
+        import threading
+        _loop = threading.Thread(target=self._run_loop, daemon=True)
+        _loop.start()
 
+        try:
+            while self._running and _loop.is_alive():
+                _loop.join(timeout=0.5)
         except KeyboardInterrupt:
             pass
         finally:
             self.shutdown()
+
+    def _run_loop(self):
+        """Wake-word → interaction loop. Runs in a daemon thread."""
+        try:
+            while self._running:
+                if self._wake_word.listen():
+                    self._handle_interaction()
+        except Exception as e:
+            logger.error(f"Run loop error: {e}")
+            self._running = False
 
     # ─────────────────────────────────────────────────────────────────────────
     # Interaction handling
@@ -1072,11 +1089,11 @@ def main():
         enable_vision=not args.no_vision,
     )
 
-    # Handle Ctrl+C gracefully
+    # Backup signal handler — the run() loop catches KeyboardInterrupt itself,
+    # but this fires if the signal lands outside the join() window.
     def handle_sigint(signum, frame):
-        print()  # Newline after ^C
-        sterling.shutdown()
-        sys.exit(0)
+        print()
+        sterling._running = False
 
     signal.signal(signal.SIGINT, handle_sigint)
 
