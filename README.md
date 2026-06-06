@@ -27,12 +27,14 @@ Say **"Hey Sterling"** → wait for *"Yes?"* → speak your request.
 ## What Sterling Can Do
 
 - **Conversation** — project help, debugging, brainstorming, general knowledge
-- **Smart wind-down** — say *"goodbye"*, *"I'm done"*, or *"talk later"* and Sterling says goodbye then goes back to listening
 - **Room awareness** — face recognition and object detection via USB webcam + YOLO
 - **Control Govee lights** — on/off, colors, brightness, mid-conversation
 - **Spotify control** — play, pause, skip, volume, search by artist or song
 - **Weather** — current conditions and two-day forecast, any location
-- **Persistent memory** — remembers context across sessions via `memory.json`
+- **Create projects** — scaffold Python, C, C++, JS, Rust, Go, Bash with generated starter code
+- **Persistent memory** — ChromaDB semantic recall across sessions
+- **Smart wind-down** — say *"goodbye"*, *"I'm done"*, or *"talk later"* to end the conversation naturally
+- **Wake word interrupt** — say the wake word mid-response to cut Sterling off immediately
 
 ---
 
@@ -49,10 +51,11 @@ Say **"Hey Sterling"** → wait for *"Yes?"* → speak your request.
 | `"What's playing?"` | Current Spotify track |
 | `"What's the weather like?"` | Weather for your configured location |
 | `"Weather in Denver"` | Weather for any city on the fly |
-| `"Who's in the room?"` | Report detected faces (vision required) |
-| `"What do you see?"` | Report detected objects (vision required) |
+| `"Who's in the room?"` | Recognised faces from webcam |
+| `"What do you see?"` | All detected objects from webcam |
+| `"Create a Python project called tracker"` | Scaffold a new project |
+| `"Run diagnostics"` / `"System status"` | What's online and what's not |
 | `"Clear memory"` | Reset conversation history |
-| `"How long have we been talking?"` | Session duration |
 | `"I'm done"` / `"Goodbye"` / `"Talk later"` | Sterling says goodbye, returns to wake word |
 | `"Shut down"` / `"Power off"` | Full shutdown |
 
@@ -64,13 +67,13 @@ Say **"Hey Sterling"** → wait for *"Yes?"* → speak your request.
 |---|---|
 | Wake Word | Faster-Whisper tiny + energy VAD |
 | Speech-to-Text | Faster-Whisper base |
-| Language Model | Ollama + Llama 3.2 1B |
+| Language Model | Ollama + Llama 3.2 3B |
 | Text-to-Speech | Edge-TTS (`en-GB-RyanNeural`) |
 | Smart Lights | Govee cloud API |
 | Music | Spotify Web API (spotipy) |
 | Weather | wttr.in (no API key) |
 | Vision | USB webcam + YOLOv8 + face_recognition |
-| Memory | JSON (session + persistent cross-session recall) |
+| Memory | ChromaDB semantic recall + JSON archive |
 | Platform | M1 Mac, Python 3.11, Metal GPU |
 
 ---
@@ -79,25 +82,27 @@ Say **"Hey Sterling"** → wait for *"Yes?"* → speak your request.
 
 ### Vision (Webcam + YOLO)
 ```bash
-# Install deps
-brew install cmake          # M1 Mac only — needed for dlib
 source ster/bin/activate
+brew install cmake                              # M1 Mac — needed for dlib
 pip install ultralytics opencv-python
-pip install dlib face_recognition   # optional — enables face ID
+pip install dlib face_recognition               # optional — enables face ID
 ```
 
-Set `vision.enabled: true` in `config.yaml`. To enrol faces, drop a named photo into `vision/faces/`:
+Set `vision.enabled: true` in `config.yaml`. To enrol faces drop a named photo into `vision/faces/`:
 ```
-vision/faces/jtb.jpg    → Sterling will say "I can see jtb"
+vision/faces/jtb.jpg    →  Sterling will say "I can see jtb"
 ```
+Restart Sterling after adding photos.
 
 ---
 
 ### Govee Lights
 ```bash
-python scripts/discover_govee.py   # finds your devices and prints config
+python scripts/discover_govee.py   # finds your devices and prints config to paste
 ```
 Then set `govee.enabled: true` and paste the device block into `config.yaml`.
+
+---
 
 ### Spotify
 1. Create a free app at [developer.spotify.com](https://developer.spotify.com) — tick **Web API**
@@ -105,9 +110,11 @@ Then set `govee.enabled: true` and paste the device block into `config.yaml`.
 3. Paste `client_id` and `client_secret` into `config.yaml`
 4. Set `spotify.enabled: true` — first launch opens a browser for a one-time login
 
+---
+
 ### Weather
 Set your default location in `config.yaml` under `weather.location`. No API key needed.
-You can also ask for any city mid-conversation: *"what's the weather in Tokyo?"*
+You can also ask for any city on the fly: *"what's the weather in Tokyo?"*
 
 ---
 
@@ -117,8 +124,6 @@ Copy the example and fill in your details:
 ```bash
 cp config.yaml.example config.yaml
 ```
-
-Key sections in `config.yaml`:
 
 | Section | Purpose |
 |---|---|
@@ -130,8 +135,9 @@ Key sections in `config.yaml`:
 | `govee` | API key and device list |
 | `spotify` | Client credentials |
 | `weather` | Default location |
+| `workspace` | Where new projects get created |
 | `vision` | Camera index, YOLO model, face enrollment directory |
-| `memory` | History size, persistence, cross-session recall |
+| `memory` | Window size, ChromaDB path, persistence settings |
 | `conversation` | Idle timeout, sleep message |
 
 ---
@@ -152,8 +158,8 @@ python main.py --config dev.yaml    # Use alternate config file
 |---|---|
 | [`STERLING.md`](STERLING.md) | Full architecture, components, setup, configuration reference |
 | [`FUTURE_ITERATIONS.md`](FUTURE_ITERATIONS.md) | Jetson Orin build, Windows GPU build, ideas & roadmap |
-| [`VOICES.md`](VOICES.md) | Full Edge-TTS and macOS voice reference |
+| [`VOICES.md`](VOICES.md) | Full Edge-TTS voice reference |
 
 ---
 
-*Platform: M1 Mac v1 — Jetson Orin build planned. Read [`FUTURE_ITERATIONS.md`](FUTURE_ITERATIONS.md) for the roadmap.*
+*Platform: M1 Mac v1 — Jetson Orin Nano build planned. See [`FUTURE_ITERATIONS.md`](FUTURE_ITERATIONS.md).*
