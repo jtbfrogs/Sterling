@@ -387,7 +387,13 @@ class WebcamVision:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _capture_loop(self):
-        """Background thread — keeps self._frame updated continuously."""
+        """
+        Background thread — keeps self._frame updated at ~15 fps.
+        Capped below the camera's native 30 fps so the capture thread
+        doesn't compete with Ollama / Whisper for CPU.
+        """
+        _interval = 1.0 / 15.0  # target 15 fps
+        _next = time.monotonic()
         while self._running:
             ret, frame = self._cap.read()
             if ret:
@@ -395,6 +401,14 @@ class WebcamVision:
                     self._frame = frame
             else:
                 time.sleep(0.01)
+                continue
+            # Pace the loop — sleep off any remaining time in the frame budget
+            _next += _interval
+            _slack = _next - time.monotonic()
+            if _slack > 0:
+                time.sleep(_slack)
+            else:
+                _next = time.monotonic()  # fell behind — reset target
 
     def _get_frame(self) -> Optional[np.ndarray]:
         with self._frame_lock:

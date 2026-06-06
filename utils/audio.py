@@ -112,9 +112,9 @@ class AudioRecorder:
 
     def open_stream(self):
         """
-        Open a persistent input stream that stays alive across multiple
-        listen_for_speech() calls and interruption-monitor reads.
-        Eliminates the ~200 ms open/close overhead between conversation turns.
+        Start the persistent input stream.
+        First call allocates it; subsequent calls just restart it (~10 ms)
+        instead of destroying and recreating (~200 ms).
         """
         if self._stream is None:
             self._stream = self._pa.open(
@@ -125,17 +125,38 @@ class AudioRecorder:
                 frames_per_buffer=self.chunk_size,
             )
             logger.debug("Persistent input stream opened.")
+        else:
+            try:
+                if not self._stream.is_active():
+                    self._stream.start_stream()
+                    logger.debug("Persistent input stream restarted.")
+            except Exception:
+                # Stream in bad state — recreate it
+                try:
+                    self._stream.close()
+                except Exception:
+                    pass
+                self._stream = self._pa.open(
+                    format=pyaudio.paInt16,
+                    channels=self.channels,
+                    rate=self.sample_rate,
+                    input=True,
+                    frames_per_buffer=self.chunk_size,
+                )
+                logger.debug("Persistent input stream recreated.")
 
     def close_stream(self):
-        """Close the persistent stream (call when leaving conversation mode)."""
+        """
+        Suspend the persistent stream without destroying it.
+        Uses stop_stream() so open_stream() can restart in ~10 ms.
+        """
         if self._stream:
             try:
-                self._stream.stop_stream()
-                self._stream.close()
+                if self._stream.is_active():
+                    self._stream.stop_stream()
             except Exception:
                 pass
-            self._stream = None
-            logger.debug("Persistent input stream closed.")
+            logger.debug("Persistent input stream stopped.")
 
     def listen_for_speech(self, timeout_seconds: float) -> Optional[np.ndarray]:
         """
@@ -208,8 +229,14 @@ class AudioRecorder:
         return raw_audio.astype(np.float32) / 32768.0
 
     def terminate(self):
-        """Release PyAudio resources. Call on shutdown."""
-        self.close_stream()  # must close stream before terminating PyAudio
+        """Release all PyAudio resources. Call on shutdown."""
+        if self._stream:
+            try:
+                self._stream.stop_stream()
+                self._stream.close()   # full close on final shutdown
+            except Exception:
+                pass
+            self._stream = None
         self._pa.terminate()
         logger.debug("AudioRecorder terminated.")
 

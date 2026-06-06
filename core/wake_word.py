@@ -139,23 +139,41 @@ class WakeWordDetector:
 
     def pause(self):
         """
-        Close the audio stream while keeping the Whisper model loaded.
-        Call before opening any other input stream (recorder, monitor).
-        The main loop must not call listen() while paused.
+        Suspend the audio stream while keeping the Whisper model loaded.
+        Uses stop_stream() instead of close() so resume() can restart it
+        in ~10 ms rather than ~200 ms (no CoreAudio buffer reallocation).
         """
         if self._stream:
-            self._stream.stop_stream()
-            self._stream.close()
-            self._stream = None
+            try:
+                if self._stream.is_active():
+                    self._stream.stop_stream()
+            except Exception:
+                pass
         self._reset_state()
         logger.debug("Wake word detector paused.")
 
     def resume(self):
         """
-        Reopen the audio stream after pause().
-        Call once all other input streams have been closed.
+        Resume the audio stream after pause().
+        Fast path: start_stream() on the existing stream (~10 ms).
+        Fallback: recreate the stream if it was fully closed (e.g. after stop()).
         """
-        if self._pa and self._stream is None:
+        if self._stream is not None:
+            try:
+                if not self._stream.is_active():
+                    self._stream.start_stream()
+                self._reset_state()
+                logger.debug("Wake word detector resumed.")
+                return
+            except Exception:
+                # Stream is in a bad state — fall through to recreate
+                try:
+                    self._stream.close()
+                except Exception:
+                    pass
+                self._stream = None
+
+        if self._pa:
             self._stream = self._pa.open(
                 rate=_SAMPLE_RATE,
                 channels=1,
@@ -164,7 +182,7 @@ class WakeWordDetector:
                 frames_per_buffer=_CHUNK,
             )
             self._reset_state()
-            logger.debug("Wake word detector resumed.")
+            logger.debug("Wake word detector resumed (stream recreated).")
 
     def stop(self):
         """Close the audio stream and release all resources."""
