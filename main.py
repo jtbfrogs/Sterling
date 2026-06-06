@@ -43,6 +43,7 @@ from utils.audio import AudioRecorder
 from utils.logger import setup_logger
 from utils.text import truncate_for_display
 from utils.weather import get_weather_context
+from datetime import datetime
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -451,8 +452,9 @@ class Sterling:
                     if project_result:
                         llm_text = f"{text}\n\n[{project_result}]"
 
-            # Weather - inject current conditions so LLM can answer naturally
             llm_text = text
+
+            # Weather — inject live conditions so LLM answers from real data
             if self._is_weather_query(text):
                 location = (
                     self._extract_weather_location(text)
@@ -463,10 +465,32 @@ class Sterling:
                     if conditions:
                         llm_text = (
                             f"{text}\n\n"
-                            f"[Use only the following data to answer - do not guess or add details: "
+                            f"[Use only the following data to answer — do not guess: "
                             f"{conditions}]"
                         )
                         logger.info(f"Weather context injected for: {location}")
+
+            # Vision — inject live scene description so LLM can answer
+            # naturally: “what am I holding”, “what do you see”, etc.
+            if not intent_handled and self._is_vision_query(text):
+                if not self._vision:
+                    llm_text = f"{text}\n\n[Camera is offline — you cannot see anything.]"
+                else:
+                    scene = self._vision.get_scene_description()
+                    llm_text = (
+                        f"{text}\n\n"
+                        f"[Camera feed — use this to answer, do not guess: {scene}]"
+                    )
+                    logger.info(f"Vision context injected: {scene[:80]}")
+                intent_handled = True
+
+            # Time / date — inject so LLM can answer naturally
+            if self._is_time_query(text):
+                now = datetime.now()
+                time_str = now.strftime("%I:%M %p").lstrip("0")  # e.g. "3:45 PM"
+                date_str = now.strftime("%A, %B %d, %Y")         # e.g. "Monday, June 9 2025"
+                llm_text = f"{text}\n\n[Current local time: {time_str}. Today is {date_str}.]"
+                logger.info(f"Time context injected: {time_str}, {date_str}")
 
             if spotify_context:
                 llm_text = f"{text}\n\n[Currently playing: {spotify_context}]"
@@ -550,27 +574,8 @@ class Sterling:
             )
             return True
 
-        # ── Vision commands ───────────────────────────────────────────────────
-        face_phrases   = [
-            "who's in the room", "who is in the room",
-            "who do you see", "who's there", "anyone in the room",
-        ]
-        object_phrases = [
-            "what do you see", "what's in front of you", "what can you see",
-            "look at this", "what is this", "what are you looking at",
-        ]
-        if any(phrase in t for phrase in face_phrases + object_phrases):
-            if not self._vision:
-                self._tts.speak(
-                    "Camera is offline right now, so I can't see anything."
-                )
-                return True
-            if any(phrase in t for phrase in face_phrases):
-                self._report_faces()
-            else:
-                self._report_objects()
-            return True
-
+        # Vision queries are handled via LLM context injection
+        # (see _is_vision_query() + _conversation_loop).
         # diagnostics
         if any(phrase in t for phrase in [
             "run diagnostics", "system status", "what's working",
@@ -884,6 +889,41 @@ class Sterling:
         except Exception as e:
             logger.error(f"Code generation failed: {e}")
             return ""
+
+    def _is_vision_query(self, text: str) -> bool:
+        """
+        Returns True if the user is asking about what the camera sees.
+        Covers broad natural phrasing: objects, people, actions, held items.
+        """
+        t = text.lower()
+        return any(phrase in t for phrase in [
+            # What do you see
+            "what do you see", "what can you see", "what are you seeing",
+            "what's in front of you", "what is in front of you",
+            "look at this", "what is this", "what are you looking at",
+            "describe what you see", "describe the room", "describe the scene",
+            # Who / people
+            "who's in the room", "who is in the room", "who do you see",
+            "who's there", "who is there", "anyone in the room",
+            "can you see me", "do you see me",
+            # Holding / hands
+            "what am i holding", "what's in my hand", "what is in my hand",
+            "what am i carrying", "what do i have in my hand",
+            "what's that in my hand", "what is that",
+            # Actions / context
+            "what am i doing", "what's going on", "what do you notice",
+            "anything interesting", "what's around",
+        ])
+
+    def _is_time_query(self, text: str) -> bool:
+        """Returns True if the user is asking for the current time or date."""
+        t = text.lower()
+        return any(phrase in t for phrase in [
+            "what time", "what's the time", "do you know the time",
+            "what's today", "what day is it", "what's the date",
+            "today's date", "what is today", "day of the week",
+            "what year", "what month",
+        ])
 
     def _is_weather_query(self, text: str) -> bool:
         """Returns True if the user is asking about the weather."""

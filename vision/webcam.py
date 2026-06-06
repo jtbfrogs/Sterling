@@ -258,6 +258,127 @@ class WebcamVision:
         return desc
 
     # ─────────────────────────────────────────────────────────────────────────
+    # Rich scene description for LLM context injection
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def get_scene_description(self) -> str:
+        """
+        Returns a plain-English scene description suitable for injecting into
+        LLM context.  Includes object identities, approximate positions
+        (left / centre / right, foreground / background), and a best-guess
+        at what the person might be holding based on spatial overlap with
+        the lower half of the person bounding box.
+
+        Example output:
+            "person (centre, large — likely you); cell phone (centre,
+             foreground — possibly in hand); laptop (right, background);
+             coffee cup (left, foreground)"
+        """
+        frame = self._get_frame()
+        if frame is None:
+            return "camera feed unavailable"
+
+        frame_h, frame_w = frame.shape[:2]
+        frame_area = frame_h * frame_w
+
+        results = self._yolo(frame, verbose=False, conf=self._conf_thresh)
+        boxes   = results[0].boxes
+
+        if not boxes or len(boxes) == 0:
+            return "nothing detected in frame right now"
+
+        # ── Parse all detections ──────────────────────────────────────────────
+        detections = []
+        person_box = None  # largest person box for hand-proximity check
+        person_area = 0
+
+        for box in boxes:
+            cls_id = int(box.cls[0])
+            label  = COCO_CLASSES[cls_id] if cls_id < len(COCO_CLASSES) else "unknown"
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            cx    = (x1 + x2) // 2
+            area  = (x2 - x1) * (y2 - y1)
+
+            # Horizontal position
+            if cx < frame_w * 0.33:
+                h_pos = "left"
+            elif cx > frame_w * 0.67:
+                h_pos = "right"
+            else:
+                h_pos = "centre"
+
+            # Depth proxy: bounding-box area vs frame area
+            ratio = area / frame_area
+            if ratio > 0.25:
+                depth = "large"
+            elif ratio > 0.06:
+                depth = "medium"
+            else:
+                depth = "small"
+
+            detections.append({
+                "label": label,
+                "h_pos": h_pos,
+                "depth": depth,
+                "box":   (x1, y1, x2, y2),
+                "cx":    cx,
+                "area":  area,
+            })
+
+            if label == "person" and area > person_area:
+                person_box  = (x1, y1, x2, y2)
+                person_area = area
+
+        # ── Apply face recognition labels ─────────────────────────────────────
+        if self._use_face_recog and self._known_encodings:
+            blocks = self._detect()   # full pipeline with face ID
+            label_map = {}
+            for b in blocks:
+                if b.label not in ("person", "unknown", ""):
+                    label_map[(b.x, b.y)] = b.label
+            for det in detections:
+                if det["label"] == "person":
+                    cx, cy = det["cx"], (det["box"][1] + det["box"][3]) // 2
+                    best = min(
+                        label_map.items(),
+                        key=lambda kv: abs(kv[0][0] - cx) + abs(kv[0][1] - cy),
+                        default=None,
+                    )
+                    if best and abs(best[0][0] - cx) < 120:
+                        det["label"] = best[1]
+
+        # ── Build description ─────────────────────────────────────────────────
+        parts = []
+        for det in sorted(detections, key=lambda d: -d["area"]):  # largest first
+            label = det["label"]
+            desc  = label
+
+            # Positional context
+            pos_note = f"{det['h_pos']}, {det['depth']}"
+
+            # "Holding" heuristic: non-person object whose box overlaps the
+            # lower 50 % of the largest person bounding box
+            in_hand = False
+            if person_box and label not in ("person", "unknown"):
+                px1, py1, px2, py2 = person_box
+                ox1, oy1, ox2, oy2 = det["box"]
+                hand_zone_top = py1 + (py2 - py1) * 0.5
+                horiz_overlap = max(0, min(px2, ox2) - max(px1, ox1))
+                if oy2 >= hand_zone_top and horiz_overlap > 0:
+                    in_hand = True
+
+            if label in ("person", "unknown"):
+                note = f"{pos_note} — likely you" if det["depth"] == "large" else pos_note
+            elif in_hand:
+                note = f"{pos_note} — possibly in hand"
+            else:
+                note = pos_note
+
+            parts.append(f"{desc} ({note})")
+
+        return "; ".join(parts) if parts else "nothing clearly identifiable"
+
+    # ─────────────────────────────────────────────────────────────────────────
     # Detection internals
     # ─────────────────────────────────────────────────────────────────────────
 
