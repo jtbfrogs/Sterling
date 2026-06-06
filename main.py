@@ -29,6 +29,7 @@ from core.llm import LLM
 from core.tts import TTS
 from core.memory import Memory
 from core.vision import HuskyLens, ALGORITHM_FACE_RECOGNITION
+from vision.webcam import WebcamVision
 from core.govee import GoveeCloud, GoveeLocal, COLORS
 from core.spotify import Spotify
 from core.workspace import Workspace, LANGUAGE_ALIASES
@@ -197,37 +198,52 @@ class Sterling:
         logger.info("✓ Text-to-speech initialized")
 
     def _init_vision(self, enable: bool):
-        self._vision: HuskyLens | None = None
+        self._vision = None
+        self._face_map: dict = {}
         vision_cfg = self._config.get("vision", {})
 
         if not enable or not vision_cfg.get("enabled", False):
-            logger.info("  Vision disabled (use --vision to enable or set vision.enabled in config)")
+            logger.info("  Vision disabled (set vision.enabled: true in config to activate)")
             return
 
-        try:
-            self._vision = HuskyLens(
-                port=vision_cfg.get("port") or None,
-                baud_rate=vision_cfg.get("baud_rate", 9600),
-                timeout=vision_cfg.get("timeout", 1.0),
-            )
+        backend = vision_cfg.get("backend", "huskylens").lower()
 
-            # Verify the device is actually responding before continuing
-            if not self._vision.ping():
-                logger.warning(
-                    "  HuskyLens2 connected but not responding to ping. "
-                    "Check: Settings → Protocol Type → UART on the device."
+        if backend == "webcam":
+            try:
+                cam = WebcamVision(
+                    device_index      = vision_cfg.get("device_index", 0),
+                    model_size        = vision_cfg.get("yolo_model", "yolov8n.pt"),
+                    face_recognition  = vision_cfg.get("face_recognition", True),
+                    known_faces_dir   = vision_cfg.get("known_faces_dir", "vision/faces"),
+                    confidence_thresh = vision_cfg.get("confidence_thresh", 0.45),
                 )
+                cam.start()
+                cam.startup_scan()
+                self._vision = cam
+                logger.info("✓ Vision (webcam + YOLO) initialized")
+            except Exception as e:
+                logger.warning(f"  Webcam vision unavailable: {e}")
 
-            self._vision.switch_algorithm(ALGORITHM_FACE_RECOGNITION)
-            self._face_map: dict = vision_cfg.get("face_map", {})
-
-            # One-shot startup scan so we can confirm the camera is sending data
-            self._vision.startup_scan(self._face_map)
-
-            logger.info("✓ Vision (HuskyLens2) initialized — face recognition active")
-        except Exception as e:
-            logger.warning(f"  Vision unavailable: {e}")
-            logger.warning("  Continuing without vision. Check USB connection.")
+        else:  # huskylens
+            try:
+                lens = HuskyLens(
+                    port      = vision_cfg.get("port") or None,
+                    baud_rate = vision_cfg.get("baud_rate", 9600),
+                    timeout   = vision_cfg.get("timeout", 1.0),
+                )
+                if not lens.ping():
+                    logger.warning(
+                        "  HuskyLens2 not responding to ping. "
+                        "Check: Settings → Protocol Type → UART on the device."
+                    )
+                lens.switch_algorithm(ALGORITHM_FACE_RECOGNITION)
+                self._face_map = vision_cfg.get("face_map", {})
+                lens.startup_scan(self._face_map)
+                self._vision = lens
+                logger.info("✓ Vision (HuskyLens2) initialized")
+            except Exception as e:
+                logger.warning(f"  HuskyLens2 unavailable: {e}")
+                logger.warning("  Continuing without vision. Check USB connection.")
 
     def _init_workspace(self):
         self._workspace: Workspace | None = None
@@ -959,52 +975,70 @@ class Sterling:
             logger.error(f"Light command failed: {e}")
 
     def _report_faces(self):
-        """Query HuskyLens2 for faces and announce what's seen."""
+        """Report recognised faces from either webcam or HuskyLens backend."""
         try:
             blocks = self._vision.get_learned_blocks()
             if not blocks:
-                self._tts.speak("I don't detect anyone in frame at the moment.")
+                self._tts.speak("I don't see anyone I recognise right now.")
                 return
 
             names = []
             for block in blocks:
-                name = self._face_map.get(block.id) or self._face_map.get(str(block.id))
-                names.append(name if name else f"an unrecognized individual")
+                # Webcam: label is the enrolled name directly
+                if hasattr(block, "label") and block.label and block.label not in ("person", "unknown", ""):
+                    names.append(block.label)
+                else:
+                    # HuskyLens: map numeric ID to name via face_map
+                    name = self._face_map.get(block.id) or self._face_map.get(str(block.id))
+                    names.append(name if name else "someone I don't recognise")
 
             if len(names) == 1:
                 self._tts.speak(f"I can see {names[0]}.")
             else:
-                name_list = ", ".join(names[:-1]) + f", and {names[-1]}"
-                self._tts.speak(f"I can see {name_list}.")
+                self._tts.speak(f"I can see {', '.join(names[:-1])} and {names[-1]}.")
 
         except Exception as e:
             logger.error(f"Vision query failed: {e}")
-            self._tts.speak("Vision system encountered an error.")
+            self._tts.speak("Vision system ran into an error.")
 
     def _report_objects(self):
-        """Query HuskyLens2 for all detected objects."""
+        """Report all detected objects from either webcam or HuskyLens backend."""
         try:
             blocks, _ = self._vision.get_all()
             if not blocks:
-                self._tts.speak("Nothing significant detected in the current frame.")
+                self._tts.speak("Nothing in frame at the moment.")
                 return
 
+            # Webcam: blocks have specific labels — give a real description
+            if blocks and hasattr(blocks[0], "label") and blocks[0].label:
+                from collections import Counter
+                counts = Counter(b.label for b in blocks)
+                parts  = []
+                for label, count in counts.most_common():
+                    if count == 1:
+                        parts.append(f"a {label}")
+                    else:
+                        plural = label + "s" if not label.endswith("s") else label
+                        parts.append(f"{count} {plural}")
+                if len(parts) == 1:
+                    self._tts.speak(f"I can see {parts[0]}.")
+                else:
+                    self._tts.speak(f"I can see {', '.join(parts[:-1])} and {parts[-1]}.")
+                return
+
+            # HuskyLens fallback: learned vs unknown count
             learned = [b for b in blocks if b.is_learned]
             unknown = [b for b in blocks if not b.is_learned]
-
-            parts = []
+            parts   = []
             if learned:
-                count = len(learned)
-                parts.append(f"{count} recognized {'object' if count == 1 else 'objects'}")
+                parts.append(f"{len(learned)} recognised {'object' if len(learned) == 1 else 'objects'}")
             if unknown:
-                count = len(unknown)
-                parts.append(f"{count} unrecognized {'item' if count == 1 else 'items'}")
-
-            self._tts.speak(f"I'm detecting {' and '.join(parts)} in the frame.")
+                parts.append(f"{len(unknown)} unrecognised {'item' if len(unknown) == 1 else 'items'}")
+            self._tts.speak(f"Detecting {' and '.join(parts)} in frame.")
 
         except Exception as e:
             logger.error(f"Vision query failed: {e}")
-            self._tts.speak("Vision system encountered an error.")
+            self._tts.speak("Vision system ran into an error.")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Shutdown
