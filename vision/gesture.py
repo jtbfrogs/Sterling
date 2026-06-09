@@ -70,20 +70,23 @@ class GestureDetector:
 
     def __init__(
         self,
-        frame_fn:       Callable,
-        model_size:     str   = "yolov8n-pose.pt",
-        poll_interval:  float = 1.0,
-        sustain_seconds:float = 1.5,
-        confidence:     float = 0.45,
+        frame_fn:          Callable,
+        model_size:        str   = "yolov8n-pose.pt",
+        poll_interval:     float = 1.0,
+        sustain_seconds:   float = 1.5,
+        confidence:        float = 0.45,
+        point_min_distance:int   = 120,
+        point_max_height:  int   = 80,
     ):
         """
         Args:
-            frame_fn:        Callable → np.ndarray | None.  Returns latest camera frame.
-            model_size:      YOLOv8-pose weights file.  Auto-downloaded on first use.
-            poll_interval:   Seconds between gesture checks.  1.0 s is a good default.
-            sustain_seconds: How long the gesture must be held before the callback fires.
-                             Prevents brief accidental triggers.
-            confidence:      Minimum keypoint confidence to trust.
+            frame_fn:           Callable → np.ndarray | None.  Latest camera frame.
+            model_size:         YOLOv8-pose weights.  Auto-downloaded on first use.
+            poll_interval:      Seconds between gesture checks.
+            sustain_seconds:    Seconds a gesture must be held before the callback fires.
+            confidence:         Minimum keypoint confidence to trust.
+            point_min_distance: Min pixel arm extension to register as a point gesture.
+            point_max_height:   Max vertical deviation for a horizontal point gesture.
         """
         if not _AVAILABLE:
             raise RuntimeError(
@@ -91,11 +94,13 @@ class GestureDetector:
                 "It should already be installed; reinstall if missing."
             )
 
-        self._get_frame  = frame_fn
-        self._model_size = model_size
-        self._interval   = poll_interval
-        self._sustain    = sustain_seconds
-        self._conf       = confidence
+        self._get_frame    = frame_fn
+        self._model_size   = model_size
+        self._interval     = poll_interval
+        self._sustain      = sustain_seconds
+        self._conf         = confidence
+        self._point_min_dx = point_min_distance
+        self._point_max_dy = point_max_height
 
         self._model: Optional[object]                = None
         self._callbacks: dict[str, list[Callable]]   = {}
@@ -208,14 +213,14 @@ class GestureDetector:
         if r_wrist is not None and r_shoulder is not None:
             dx = r_wrist[0] - r_shoulder[0]
             dy = abs(r_wrist[1] - r_shoulder[1])
-            if dx > 120 and dy < 80:
+            if dx > self._point_min_dx and dy < self._point_max_dy:
                 return "point_right"
 
         # ── Point left: left wrist clearly left of left shoulder ──────────────
         if l_wrist is not None and l_shoulder is not None:
             dx = l_shoulder[0] - l_wrist[0]
             dy = abs(l_wrist[1] - l_shoulder[1])
-            if dx > 120 and dy < 80:
+            if dx > self._point_min_dx and dy < self._point_max_dy:
                 return "point_left"
 
         return None

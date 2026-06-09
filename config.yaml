@@ -1,65 +1,248 @@
+# ══════════════════════════════════════════════════════════════════════════════
+#  STERLING — Configuration
+#  All tuneable values live here. Restart Sterling after any change.
+#  Secrets (API keys) are gitignored — never commit this file.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Identity & spoken responses
+# ─────────────────────────────────────────────────────────────────────────────
 sterling:
   name: "Sterling"
-  startup_message: "Sterling online, how can i assist you?"
+  startup_message:  "Sterling online, how can I assist you?"
   shutdown_message: "Understood. Powering down. Goodbye."
 
+  # Spoken when the wake word fires and Sterling is ready to listen
+  ack_message: "Yes?"
+
+  # Spoken when the conversation times out and Sterling goes back to sleep
+  sleep_message: "Going quiet. Say my name when you need me."
+
+  # Spoken after "clear memory" command
+  memory_clear_message: "Memory cleared. I've forgotten our previous conversation. Starting fresh."
+
+  # Template for session-status response  ({duration} and {turns} are filled in)
+  session_duration_response: "We've been talking for {duration}, across {turns} exchanges."
+
+  # Spoken by the presence monitor when you walk in (presence.greet_on_enter: true)
+  greet_on_enter_message: "Welcome back."
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Command trigger phrases  (substring match, case-insensitive)
+# Add your own phrases to any list — Sterling will react to all of them.
+# ─────────────────────────────────────────────────────────────────────────────
+commands:
+
+  # Hard shutdown — kills the process
+  shutdown:
+    - "shut down"
+    - "shutdown"
+    - "power off"
+    - "go offline"
+
+  # Graceful wind-down — LLM says goodbye first, then returns to wake-word mode
+  winddown:
+    - "i'm done"
+    - "im done"
+    - "goodbye"
+    - "talk later"
+
+  # Wipe the in-session conversation window (JSON + ChromaDB NOT wiped)
+  memory_clear:
+    - "clear memory"
+    - "clear your memory"
+    - "forget everything"
+    - "reset conversation"
+    - "start fresh"
+
+  # Ask how long the session has been running
+  session_status:
+    - "how long have we been talking"
+    - "session duration"
+    - "how long have you been running"
+
+  # Speak a summary of which subsystems are online
+  diagnostics:
+    - "run diagnostics"
+    - "system status"
+    - "what's working"
+    - "what is working"
+    - "systems check"
+    - "your status"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Context-injection trigger phrases  (substring match, case-insensitive)
+# These route the question through the matching context injector before
+# the LLM responds — so Sterling answers with real data, not guesses.
+# ─────────────────────────────────────────────────────────────────────────────
+queries:
+
+  # Camera / vision — injects live scene description
+  vision:
+    - "what do you see"
+    - "what can you see"
+    - "what are you seeing"
+    - "what's in front of you"
+    - "what is in front of you"
+    - "look at this"
+    - "what is this"
+    - "what are you looking at"
+    - "describe what you see"
+    - "describe the room"
+    - "describe the scene"
+    - "who's in the room"
+    - "who is in the room"
+    - "who do you see"
+    - "who's there"
+    - "who is there"
+    - "anyone in the room"
+    - "can you see me"
+    - "do you see me"
+    - "what am i holding"
+    - "what's in my hand"
+    - "what is in my hand"
+    - "what am i carrying"
+    - "what do i have in my hand"
+    - "what's that in my hand"
+    - "what am i doing"
+    - "what's going on"
+    - "what do you notice"
+    - "anything interesting"
+
+  # Time / date — injects current local datetime
+  time:
+    - "what time"
+    - "what's the time"
+    - "do you know the time"
+    - "what's today"
+    - "what day is it"
+    - "what's the date"
+    - "today's date"
+    - "what is today"
+    - "day of the week"
+    - "what year"
+    - "what month"
+
+  # Weather — injects live wttr.in data for the configured location
+  weather:
+    - "weather"
+    - "temperature"
+    - "how hot"
+    - "how cold"
+    - "how warm"
+    - "raining"
+    - "snowing"
+    - "outside"
+    - "bring a jacket"
+    - "what's it like"
+    - "forecast"
+
+  # Object tracking — injects last-seen position from object_tracker.json
+  tracking:
+    - "where's my"
+    - "where is my"
+    - "where did i put"
+    - "have you seen my"
+    - "seen my"
+    - "find my"
+    - "where did i leave"
+    - "where are my"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Wake-word detection
+# ─────────────────────────────────────────────────────────────────────────────
 wake_word:
-  # Phrases that trigger Sterling (case-insensitive substring match in transcription)
   phrases:
     - "hey sterling"    # most reliable — two distinct words
     - "sterling"        # solid single-word trigger
     - "ster"            # short variant
-  # Whisper model for wake detection: tiny (fast) or base (more accurate)
-  model_size: "tiny"
-  # RMS energy threshold — raise if background noise causes false triggers
-  energy_threshold: 500
-  # Seconds of silence after speech before transcription fires
-  silence_duration: 0.6
-  # Maximum audio buffer before forcing transcription
+  model_size: "tiny"    # tiny (fast, ~150 MB) | base (more accurate, ~290 MB)
+  energy_threshold: 500 # RMS amplitude — raise if background noise false-triggers
+  silence_duration: 0.6 # seconds of silence after speech before transcription fires
   max_buffer_seconds: 2.5
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LLM  (Ollama)
+# ─────────────────────────────────────────────────────────────────────────────
 llm:
   model: "llama3.2:3b"
   base_url: "http://localhost:11434"
   temperature: 0.7
   context_window: 4096
   stream: true
-  max_tokens: 150         # Max tokens in the LLM response. Lower = shorter answers (faster TTS).
-                           # 128 = very brief | 150 = casual/concise | 256 = detailed | 512+ = long-form
+  max_tokens: 150   # 128=brief | 150=casual | 256=detailed | 512+=long-form
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Speech-to-text  (Faster-Whisper)
+# ─────────────────────────────────────────────────────────────────────────────
 stt:
-  model: "base"         # tiny | base | small  (base recommended for M1 8GB)
+  model: "base"       # tiny | base | small  (base recommended for M1 8 GB)
   language: "en"
-  device: "cpu"         # cpu (M1 optimized via int8)
+  device: "cpu"       # cpu (int8 on M1 is fast)
   compute_type: "int8"
 
-tts:
-  voice: "en-GB-RyanNeural"    # British male — Jarvis feel. See edge-tts voices list.
-  rate: "+5%"                   # Speed adjustment: -50% to +100%
-  pitch: "-5Hz"                 # Pitch: -50Hz to +50Hz (lower = deeper)
-  fallback_voice: "Alex"        # macOS `say` fallback voice (used when offline)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Text-to-speech  (Edge-TTS + macOS say fallback)
+# ─────────────────────────────────────────────────────────────────────────────
+tts:
+  voice: "en-GB-RyanNeural"  # British male — Jarvis feel. Run `edge-tts --list-voices` for options.
+  rate: "+5%"                # Speed: -50% to +100%
+  pitch: "-5Hz"              # Pitch: -50Hz to +50Hz  (lower = deeper)
+  fallback_voice: "Alex"     # macOS `say` voice used when offline
+
+  # Minimum characters to buffer before sending a chunk to synthesis.
+  # Lower = first words arrive faster.  Higher = fewer HTTP round-trips, smoother audio.
+  stream_chunk_chars: 80
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Audio / microphone
+# ─────────────────────────────────────────────────────────────────────────────
 audio:
   sample_rate: 16000
   channels: 1
   chunk_size: 1024
-  silence_threshold: 500        # RMS energy cutoff — raise if mic is noisy, lower if too sensitive
-  silence_duration: 1.0         # Seconds of silence before recording stops (1.0 = snappier turns)
-  max_recording_seconds: 30     # Safety cap on recording length
+  silence_threshold: 500      # RMS energy cutoff — raise if mic is noisy
+  silence_duration: 1.0       # seconds of silence before recording stops
+  max_recording_seconds: 30   # hard safety cap on recording length
 
-workspace:
-  path: "/Users/jtb/src/sterling/SterProjec"   # Where Sterling creates new projects. Never touches files outside this folder.
 
-spotify:
-  enabled: true              # Set to true once you have your developer app credentials
-  client_id: "7e4dea0d56cf49a2a3bf19fdb67f5bf1"               # From developer.spotify.com — create a free app
-  client_secret: "f0ee5d7343284a7a8b5f6ff7563819fa"           # From developer.spotify.com
-  redirect_uri: "http://127.0.0.1:8888/callback"   # Must match what you set in the app dashboard
-  cache_path: ".spotify_cache"                     # Where the OAuth token gets saved locally
+# ─────────────────────────────────────────────────────────────────────────────
+# Conversation loop
+# ─────────────────────────────────────────────────────────────────────────────
+conversation:
+  timeout: 20    # seconds of silence before returning to wake-word mode
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Memory
+# ─────────────────────────────────────────────────────────────────────────────
+memory:
+  max_history: 10         # turns kept in the active session window
+  persist: true           # write every message to memory_file with timestamps
+  memory_file: "memory.json"
+  recall_turns: 2         # turns recalled from last session as background context
+  chroma_enabled: true    # semantic long-term memory via ChromaDB
+  chroma_path: ".chroma"
+  chroma_results: 3       # past exchanges injected per LLM call
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Weather
+# ─────────────────────────────────────────────────────────────────────────────
 weather:
-  location: "Superior, Colorado"   # Default location — you can also just ask "weather in Denver" mid-conversation
+  location: "Superior, Colorado"   # default — you can also say "weather in Denver" on the fly
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Govee smart lights
+# ─────────────────────────────────────────────────────────────────────────────
 govee:
   enabled: true
   api_key: "6ac8d3a1-386b-4889-85a2-c5382a906c84"
@@ -70,60 +253,84 @@ govee:
     - name: "TV Backlight 3 Lite"
       device_id: "6A:F1:DD:99:82:C6:3E:65"
       model: "H6099"
-  discovery_timeout: 3                               # Only used for local LAN fallback
+  discovery_timeout: 3
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Spotify
+# ─────────────────────────────────────────────────────────────────────────────
+spotify:
+  enabled: true
+  client_id: "7e4dea0d56cf49a2a3bf19fdb67f5bf1"
+  client_secret: "f0ee5d7343284a7a8b5f6ff7563819fa"
+  redirect_uri: "http://127.0.0.1:8888/callback"
+  cache_path: ".spotify_cache"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Workspace  (project scaffolding)
+# ─────────────────────────────────────────────────────────────────────────────
+workspace:
+  path: "/Users/jtb/src/sterling/SterProjec"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Vision  (webcam + YOLO + face recognition)
+# ─────────────────────────────────────────────────────────────────────────────
 vision:
   enabled: true
-  device_index: 0               # USB camera index (0 = first USB cam)
-  yolo_model: "yolov8n.pt"      # yolov8n=fastest | yolov8s=more accurate
-  face_recognition: true        # Requires face_recognition + dlib (see README)
-  known_faces_dir: "vision/faces"  # Drop named JPGs here to enrol faces
-  confidence_thresh: 0.45       # Min YOLO detection confidence (0.0–1.0)
+  device_index: 0                 # USB camera index  (0 = first cam)
+  yolo_model: "yolov8n.pt"        # yolov8n=fastest | yolov8s=more accurate
+  face_recognition: true
+  known_faces_dir: "vision/faces" # drop named JPGs here to enrol faces
+  confidence_thresh: 0.45         # minimum YOLO detection confidence  (0.0–1.0)
 
-conversation:
-  # Seconds of silence after a response before Sterling goes back to sleep
-  # and requires the wake word again. Set higher for a more patient assistant.
-  timeout: 20
-  sleep_message: "Going quiet. Say my name when you need me."
+  # Face recognition
+  face_tolerance: 0.55            # matching strictness — lower = stricter  (0.4–0.6)
+  face_merge_distance: 100        # pixel radius to merge a face detection with a YOLO person box
 
-memory:
-  max_history: 10               # Max conversation turns to keep in the active session window
-  persist: true                 # Save every message to memory.json with timestamps
-  memory_file: "memory.json"    # Path to the JSON memory file (gitignored)
-  recall_turns: 2               # Recent turns to anchor from last session (ChromaDB handles deeper recall)
-  chroma_enabled: true          # Semantic long-term memory via ChromaDB
-  chroma_path: ".chroma"        # Where ChromaDB stores its files (gitignored)
-  chroma_results: 3             # How many relevant past exchanges to inject per LLM call
+  # Expression detection
+  smile_threshold: 0.04           # lip-curve ratio to flag someone as smiling  (0.02–0.08)
 
-logging:
-  level: "INFO"                 # DEBUG | INFO | WARNING | ERROR
-  file: "sterling.log"          # Set to null to disable file logging
-  console: true
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Gesture Detection (disabled by default — requires vision.enabled: true)
-# Detects: wave, hands_up, point_left, point_right via YOLOv8n-pose
-# pose model (~7 MB) downloads automatically on first use.
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Gesture detection  (disabled by default — requires vision.enabled: true)
+# yolov8n-pose.pt (~7 MB) downloads automatically on first use.
+# ─────────────────────────────────────────────────────────────────────────────
 gestures:
-  enabled: false                # Set true to activate background gesture monitoring
-  poll_interval: 1.0            # Seconds between gesture checks
-  sustain: 1.5                  # Seconds to hold gesture before it fires
-  confidence: 0.45              # Min keypoint confidence to trust
-  model: "yolov8n-pose.pt"      # Pose model weights (auto-downloaded on first use)
-  wave_action: "wake"           # wave: wake Sterling (alternative to saying wake word)
-  hands_up_action: "stop"       # hands_up: stop TTS + pause music
-  point_right_action: "next"    # point_right: Spotify next track
-  point_left_action: "prev"     # point_left: Spotify previous track
+  enabled: false
+  poll_interval: 1.0              # seconds between gesture checks
+  sustain: 1.5                    # seconds to hold gesture before it fires
+  confidence: 0.45                # minimum keypoint confidence
+  model: "yolov8n-pose.pt"
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Presence Detection (disabled by default — requires vision.enabled: true)
-# Runs a lightweight background check every N seconds.
-# ──────────────────────────────────────────────────────────────────────────────
+  # Pixel geometry for point detection (tune if your camera resolution differs)
+  point_min_distance: 120         # minimum px arm extension to count as a point
+  point_max_height: 80            # maximum vertical deviation for a horizontal point
+
+  # What each gesture does
+  wave_action: "wake"             # alternatives: "none"
+  hands_up_action: "stop"         # alternatives: "none"
+  point_right_action: "next"      # alternatives: "none"
+  point_left_action: "prev"       # alternatives: "none"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Presence detection  (disabled by default — requires vision.enabled: true)
+# ─────────────────────────────────────────────────────────────────────────────
 presence:
-  enabled: false                # Set true to monitor room occupancy
-  check_interval: 30            # Seconds between presence checks
-  greet_on_enter: false         # Speak "Welcome back" when you walk in
-  lights_on_enter: false        # Turn Govee lights on when person detected
-  lights_off_on_leave: false    # Turn lights off when room is empty
-  leave_delay: 300              # Seconds after leaving before triggering lights-off
+  enabled: false
+  check_interval: 30              # seconds between presence checks
+  greet_on_enter: false           # speak greet_on_enter_message when you walk in
+  lights_on_enter: false          # turn Govee lights on when person detected
+  lights_off_on_leave: false      # turn lights off when room is empty
+  leave_delay: 300                # seconds to wait before triggering lights-off
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────────────────────────────────────
+logging:
+  level: "INFO"         # DEBUG | INFO | WARNING | ERROR
+  file: "sterling.log"  # set to null to disable file logging
+  console: true

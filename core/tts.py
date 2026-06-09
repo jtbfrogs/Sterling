@@ -44,7 +44,7 @@ except ImportError:
 
 # Minimum characters to accumulate before sending a chunk to TTS.
 # Too low → many tiny HTTP calls → gaps.  Too high → long wait before first word.
-_MIN_CHUNK_CHARS = 80
+_MIN_CHUNK_CHARS = 80   # default — overridden by tts.stream_chunk_chars in config
 
 
 class TTS:
@@ -67,12 +67,14 @@ class TTS:
         rate: str = "+5%",
         pitch: str = "-5Hz",
         fallback_voice: str = "Alex",
+        stream_chunk_chars: int = _MIN_CHUNK_CHARS,
     ):
         self._voice = voice
         self._rate = rate
         self._pitch = pitch
         self._fallback_voice = fallback_voice
         self._edge_available = EDGE_TTS_AVAILABLE
+        self._chunk_chars = stream_chunk_chars
 
         # The current afplay Popen object — stored so it can be killed on interrupt
         self._current_proc: subprocess.Popen = None
@@ -143,7 +145,7 @@ class TTS:
                     # Speak all complete sentences if we have a big enough chunk
                     if len(sentences) > 1:
                         speakable = "".join(sentences[:-1])
-                        if len(speakable) >= _MIN_CHUNK_CHARS:
+                        if len(speakable) >= self._chunk_chars:
                             self._enqueue_synthesis(speakable, audio_q, stop)
                             buffer = sentences[-1]
 

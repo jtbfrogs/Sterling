@@ -202,10 +202,11 @@ class Sterling:
     def _init_tts(self):
         tts_cfg = self._config.get("tts", {})
         self._tts = TTS(
-            voice=tts_cfg.get("voice", "en-GB-RyanNeural"),
-            rate=tts_cfg.get("rate", "+5%"),
-            pitch=tts_cfg.get("pitch", "-5Hz"),
-            fallback_voice=tts_cfg.get("fallback_voice", "Alex"),
+            voice              = tts_cfg.get("voice",               "en-GB-RyanNeural"),
+            rate               = tts_cfg.get("rate",                "+5%"),
+            pitch              = tts_cfg.get("pitch",               "-5Hz"),
+            fallback_voice     = tts_cfg.get("fallback_voice",      "Alex"),
+            stream_chunk_chars = tts_cfg.get("stream_chunk_chars",  80),
         )
         logger.info("✓ Text-to-speech initialized")
 
@@ -219,11 +220,14 @@ class Sterling:
 
         try:
             cam = WebcamVision(
-                device_index      = vision_cfg.get("device_index", 0),
-                model_size        = vision_cfg.get("yolo_model", "yolov8n.pt"),
-                face_recognition  = vision_cfg.get("face_recognition", True),
-                known_faces_dir   = vision_cfg.get("known_faces_dir", "vision/faces"),
-                confidence_thresh = vision_cfg.get("confidence_thresh", 0.45),
+                device_index        = vision_cfg.get("device_index",        0),
+                model_size          = vision_cfg.get("yolo_model",          "yolov8n.pt"),
+                face_recognition    = vision_cfg.get("face_recognition",    True),
+                known_faces_dir     = vision_cfg.get("known_faces_dir",     "vision/faces"),
+                confidence_thresh   = vision_cfg.get("confidence_thresh",   0.45),
+                face_tolerance      = vision_cfg.get("face_tolerance",      0.55),
+                face_merge_distance = vision_cfg.get("face_merge_distance", 100),
+                smile_threshold     = vision_cfg.get("smile_threshold",     0.04),
             )
             cam.start()
             cam.startup_scan()
@@ -249,11 +253,13 @@ class Sterling:
         try:
             from vision.gesture import GestureDetector
             self._gesture = GestureDetector(
-                frame_fn       = self._vision.get_frame,
-                model_size     = g_cfg.get("model", "yolov8n-pose.pt"),
-                poll_interval  = g_cfg.get("poll_interval", 1.0),
-                sustain_seconds= g_cfg.get("sustain", 1.5),
-                confidence     = g_cfg.get("confidence", 0.45),
+                frame_fn           = self._vision.get_frame,
+                model_size         = g_cfg.get("model",               "yolov8n-pose.pt"),
+                poll_interval      = g_cfg.get("poll_interval",       1.0),
+                sustain_seconds    = g_cfg.get("sustain",             1.5),
+                confidence         = g_cfg.get("confidence",          0.45),
+                point_min_distance = g_cfg.get("point_min_distance",  120),
+                point_max_height   = g_cfg.get("point_max_height",    80),
             )
             logger.info("✓ Gesture detector initialised (starts at run time)")
         except Exception as e:
@@ -538,8 +544,9 @@ class Sterling:
                 if not self._running:
                     break
                 # Nobody spoke within the timeout window
-                sleep_msg = conv_cfg.get(
-                    "sleep_message", "Going quiet. Say my name when you need me."
+                sleep_msg = (
+                    self._config.get("sterling", {}).get("sleep_message")
+                    or conv_cfg.get("sleep_message", "Going quiet. Say my name when you need me.")
                 )
                 self._tts.speak(sleep_msg)
                 logger.info(f"Conversation idle for {timeout}s - returning to wake word mode.")
@@ -708,47 +715,53 @@ class Sterling:
             True if the command was handled (skip LLM), False otherwise.
         """
         t = text.lower().strip()
+        cmds  = self._config.get("commands", {})
+        s_cfg = self._config.get("sterling", {})
 
-        # ── Shutdown ──────────────────────────────────────────────────────────
-        if any(phrase in t for phrase in [
-            "shut down", "shutdown", "power off", "go offline"
-        ]):
-            shutdown_msg = self._config.get("sterling", {}).get(
-                "shutdown_message", "Understood. Powering down. Goodbye."
-            )
-            self._tts.speak(shutdown_msg)
+        # ── Shutdown ────────────────────────────────────────────
+        shutdown_phrases = cmds.get("shutdown", ["shut down", "shutdown", "power off", "go offline"])
+        if any(phrase in t for phrase in shutdown_phrases):
+            self._tts.speak(s_cfg.get("shutdown_message", "Understood. Powering down. Goodbye."))
             self._running = False
             return True
 
-        # ── Memory management ─────────────────────────────────────────────────
-        if any(phrase in t for phrase in [
+        # ── Memory clear ─────────────────────────────────────────
+        mem_phrases = cmds.get("memory_clear", [
             "clear memory", "clear your memory", "forget everything",
-            "reset conversation", "start fresh"
-        ]):
+            "reset conversation", "start fresh",
+        ])
+        if any(phrase in t for phrase in mem_phrases):
             self._memory.clear()
-            self._tts.speak(
-                "Memory cleared. I've forgotten our previous conversation. Starting fresh."
-            )
+            self._tts.speak(s_cfg.get(
+                "memory_clear_message",
+                "Memory cleared. I've forgotten our previous conversation. Starting fresh.",
+            ))
             return True
 
-        # ── Session status ────────────────────────────────────────────────────
-        if any(phrase in t for phrase in [
+        # ── Session status ─────────────────────────────────────────
+        sess_phrases = cmds.get("session_status", [
             "how long have we been talking", "session duration",
-            "how long have you been running"
-        ]):
-            self._tts.speak(
-                f"We've been talking for {self._memory.session_duration}, "
-                f"across {self._memory.turn_count} exchanges."
+            "how long have you been running",
+        ])
+        if any(phrase in t for phrase in sess_phrases):
+            template = s_cfg.get(
+                "session_duration_response",
+                "We've been talking for {duration}, across {turns} exchanges.",
             )
+            self._tts.speak(template.format(
+                duration=self._memory.session_duration,
+                turns=self._memory.turn_count,
+            ))
             return True
 
-        # Vision queries are handled via LLM context injection
-        # (see _is_vision_query() + _conversation_loop).
-        # diagnostics
-        if any(phrase in t for phrase in [
+        # Vision queries handled via LLM context injection (_is_vision_query)
+
+        # ── Diagnostics ──────────────────────────────────────────
+        diag_phrases = cmds.get("diagnostics", [
             "run diagnostics", "system status", "what's working",
             "what is working", "systems check", "your status",
-        ]):
+        ])
+        if any(phrase in t for phrase in diag_phrases):
             self._speak_diagnostics()
             return True
 
@@ -1084,80 +1097,56 @@ class Sterling:
                     return name
         return None
 
+    def _phrases(self, section: str, key: str, defaults: list) -> list:
+        """Read a phrase list from config, falling back to defaults."""
+        return self._config.get(section, {}).get(key, defaults)
+
     def _is_tracking_query(self, text: str) -> bool:
-        """Returns True if the user is asking where an object was last seen."""
         t = text.lower()
-        return any(phrase in t for phrase in [
+        return any(phrase in t for phrase in self._phrases("queries", "tracking", [
             "where's my", "where is my", "where did i put",
             "have you seen my", "seen my", "find my",
             "where did i leave", "where are my",
-        ])
+        ]))
 
     def _is_vision_query(self, text: str) -> bool:
-        """
-        Returns True if the user is asking about what the camera sees.
-        Covers broad natural phrasing: objects, people, actions, held items.
-        """
         t = text.lower()
-        return any(phrase in t for phrase in [
-            # What do you see
+        return any(phrase in t for phrase in self._phrases("queries", "vision", [
             "what do you see", "what can you see", "what are you seeing",
             "what's in front of you", "what is in front of you",
             "look at this", "what is this", "what are you looking at",
             "describe what you see", "describe the room", "describe the scene",
-            # Who / people
             "who's in the room", "who is in the room", "who do you see",
             "who's there", "who is there", "anyone in the room",
             "can you see me", "do you see me",
-            # Holding / hands
             "what am i holding", "what's in my hand", "what is in my hand",
             "what am i carrying", "what do i have in my hand",
-            "what's that in my hand", "what is that",
-            # Actions / context
-            "what am i doing", "what's going on", "what do you notice",
-            "anything interesting", "what's around",
-        ])
+            "what's that in my hand", "what am i doing", "what's going on",
+            "what do you notice", "anything interesting",
+        ]))
 
     def _is_time_query(self, text: str) -> bool:
-        """Returns True if the user is asking for the current time or date."""
         t = text.lower()
-        return any(phrase in t for phrase in [
+        return any(phrase in t for phrase in self._phrases("queries", "time", [
             "what time", "what's the time", "do you know the time",
             "what's today", "what day is it", "what's the date",
             "today's date", "what is today", "day of the week",
             "what year", "what month",
-        ])
+        ]))
 
     def _is_weather_query(self, text: str) -> bool:
-        """Returns True if the user is asking about the weather."""
         t = text.lower()
-        return any(phrase in t for phrase in [
-            "weather",
-            "temperature",
-            "how hot",
-            "how cold",
-            "how warm",
-            "raining",
-            "snowing",
-            "outside",
-            "bring a jacket",
-            "what's it like",
-            "forecast",
-        ])
+        return any(phrase in t for phrase in self._phrases("queries", "weather", [
+            "weather", "temperature", "how hot", "how cold", "how warm",
+            "raining", "snowing", "outside", "bring a jacket",
+            "what's it like", "forecast",
+        ]))
 
     def _is_winddown(self, text: str) -> bool:
-        """
-        Returns True if the user is wrapping up the conversation.
-        Sterling will still respond via LLM, then return to wake word mode
-        once TTS has finished - so Sterling always gets to say goodbye first.
-        """
         t = text.lower()
-        return any(phrase in t for phrase in [
-            "i'm done",
-            "im done",
-            "goodbye",
-            "talk later",
-        ])
+        return any(phrase in t for phrase in self._phrases("commands", "winddown", [
+            "i'm done", "im done", "goodbye", "talk later",
+        ]))
 
     # ─────────────────────────────────────────────────────────────────────────
     # Light control

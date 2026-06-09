@@ -120,19 +120,25 @@ class WebcamVision:
 
     def __init__(
         self,
-        device_index:       int   = 0,
-        model_size:         str   = "yolov8n.pt",
-        face_recognition:   bool  = True,
-        known_faces_dir:    str   = "vision/faces",
-        confidence_thresh:  float = 0.45,
+        device_index:        int   = 0,
+        model_size:          str   = "yolov8n.pt",
+        face_recognition:    bool  = True,
+        known_faces_dir:     str   = "vision/faces",
+        confidence_thresh:   float = 0.45,
+        face_tolerance:      float = 0.55,
+        face_merge_distance: int   = 100,
+        smile_threshold:     float = 0.04,
     ):
         """
         Args:
-            device_index:       OpenCV camera index. 0 = first USB cam.
-            model_size:         YOLO model weights file.
-            face_recognition:   Enable face ID (requires face_recognition library).
-            known_faces_dir:    Path to folder of enrollment photos.
-            confidence_thresh:  Min YOLO confidence to report a detection.
+            device_index:        OpenCV camera index. 0 = first USB cam.
+            model_size:          YOLO model weights file.
+            face_recognition:    Enable face ID (requires face_recognition library).
+            known_faces_dir:     Path to folder of enrollment photos.
+            confidence_thresh:   Min YOLO detection confidence (0.0–1.0).
+            face_tolerance:      face_recognition match threshold (0.4–0.6, lower=stricter).
+            face_merge_distance: Pixel radius to merge a face with a YOLO person box.
+            smile_threshold:     Lip curve ratio to flag as smiling (0.02–0.08).
         """
         if not YOLO_AVAILABLE:
             raise RuntimeError(
@@ -140,10 +146,13 @@ class WebcamVision:
                 "Install it: pip install ultralytics"
             )
 
-        self._device_index    = device_index
-        self._conf_thresh     = confidence_thresh
-        self._use_face_recog  = face_recognition and FACE_RECOGNITION_AVAILABLE
-        self._known_faces_dir = Path(known_faces_dir)
+        self._device_index     = device_index
+        self._conf_thresh      = confidence_thresh
+        self._face_tolerance   = face_tolerance
+        self._face_merge_dist  = face_merge_distance
+        self._smile_threshold  = smile_threshold
+        self._use_face_recog   = face_recognition and FACE_RECOGNITION_AVAILABLE
+        self._known_faces_dir  = Path(known_faces_dir)
 
         # YOLO
         logger.info(f"Loading YOLO model: {model_size} ...")
@@ -546,7 +555,7 @@ class WebcamVision:
         encodings = _fr.face_encodings(rgb, locations)
 
         for (top, right, bottom, left), encoding in zip(locations, encodings):
-            matches   = _fr.compare_faces(self._known_encodings, encoding, tolerance=0.55)
+            matches   = _fr.compare_faces(self._known_encodings, encoding, tolerance=self._face_tolerance)
             distances = _fr.face_distance(self._known_encodings, encoding)
 
             name    = "unknown"
