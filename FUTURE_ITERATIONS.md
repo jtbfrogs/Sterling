@@ -13,6 +13,8 @@
 4. [Sterling v4 — Linux Build](#4-sterling-v4--linux-build)
 5. [Shared Feature Roadmap](#5-shared-feature-roadmap)
 6. [Ideas — What Could Sterling Actually Do?](#6-ideas--what-could-sterling-actually-do)
+7. [Feature Backlog — v1 Mac Additions](#7-feature-backlog--v1-mac-additions)
+8. [Vision Roadmap — Medium Term & Detailed View](#8-vision-roadmap--medium-term--detailed-view)
 7. [Vision Upgrade — USB Webcam + YOLO + Face Recognition](#7-vision-upgrade--usb-webcam--yolo--face-recognition)
 8. [Model Upgrade Path](#8-model-upgrade-path)
 9. [Remote Access — iPhone / Mobile (Long-term)](#9-remote-access--iphone--mobile-long-term)
@@ -542,7 +544,303 @@ A basic HTML page served by Flask. Text input, send button, response display. Wo
 
 ---
 
-## 10. Vision Roadmap — Medium Term & Detailed View
+---
+
+## 7. Feature Backlog — v1 Mac Additions
+
+> Everything below builds on the current M1 Mac stack with no platform change required.
+> Roughly ordered: **makes Sterling feel like Jarvis** → **genuinely useful daily** → **developer tools** → **smart home** → **fun / personality** → **quality of life**.
+
+---
+
+### Makes Sterling Feel Like Jarvis
+
+**Good Morning Briefing**
+Say “good morning” or walk in (presence detection) → Sterling gives you a full situation report:
+current time, weather summary, any reminders set the night before, optional RSS headlines.
+One command, zero screen time.
+- Dependencies: `feedparser` for RSS, rest already live
+- Config: `briefing.rss_feeds`, `briefing.headline_count`
+
+**Proactive Alerts**
+Sterling watches for things and tells you without being asked:
+- Mac battery below a configured threshold → “Your laptop’s running low”
+- You’ve been at your desk for N minutes without a break → break reminder
+- Weather changes significantly mid-day (sunny → rain incoming)
+- A watched background process or file changes
+- Dependencies: `psutil` (battery/CPU), `watchdog` (file system)
+- Config: `alerts.*` with per-alert enable/disable and thresholds
+
+**Voice Notes + Recall**
+“Sterling, note down — buy coffee beans.” → timestamped entry appended to `notes.md`.
+“Sterling, what did I note this week?” → reads back recent entries via LLM summary.
+- No new dependencies — pure file I/O
+- `notes_file` path in config, searchable by date or keyword
+
+**Mood-Aware Tone**
+Sterling checks the time of day and adjusts tone automatically.
+Late night → quieter and chill. Morning → perkier. Can be overridden by voice:
+“Sterling, chill out” / “Sterling, be more upbeat.”
+- Implemented as a time-based system prompt modifier
+- Config: `tone.morning_start`, `tone.night_start`, named tone presets
+
+**Conversation History Recall**
+“Sterling, what were we talking about yesterday?”
+Currently raw turns are recalled. A summarised-sessions approach — each session gets a
+one-paragraph LLM summary stored in memory.json — would feel far more natural and use fewer tokens.
+- Light LLM call at `end_session()` time
+- Summary stored alongside the raw messages
+
+---
+
+### Genuinely Useful Every Day
+
+**Timers and Reminders**
+“Sterling, remind me in 20 minutes to check the oven.”
+“Sterling, set a 5-minute timer.”
+Sterling speaks the alert when it fires, even mid-conversation.
+- `threading.Timer` or `sched` module — no dependencies
+- Multiple simultaneous timers with labels
+- Config: `timers.chime_sound` (optional audio cue)
+
+**Pomodoro / Focus Mode**
+“Sterling, 25-minute focus session.” → counts down, announces breaks, tracks session count.
+“Sterling, how many pomodoros today?” → reports the tally.
+“4 done — nice work.” Feels like a real productivity partner.
+- Builds on the timer system above
+- Config: `pomodoro.work_minutes`, `pomodoro.break_minutes`, `pomodoro.long_break_every`
+
+**Clipboard Assistant**
+“Sterling, explain what’s in my clipboard.”
+“Sterling, fix the bug in my clipboard.”
+Reads whatever is on your clipboard (code, error message, text) and passes it to the LLM.
+No typing, no browser tab switching.
+- `pip install pyperclip` — one dependency, cross-platform
+- Massive quality-of-life win for a developer
+
+**Read the Error / Explain the Log**
+“Sterling, what does the log say?” → reads last N lines of a configured log file,
+passes to LLM for a plain-English explanation.
+“Sterling, why did it crash?” → same but focused on ERROR/EXCEPTION lines.
+- Config: `logs` list of named log files
+  ```yaml
+  logs:
+    - name: "sterling"
+      path: "sterling.log"
+    - name: "app"
+      path: "/Users/jtb/src/myproject/app.log"
+  ```
+
+**Terminal Shortcuts**
+Pre-configure named shell commands in config:
+```yaml
+shortcuts:
+  - name: "run tests"
+    command: "cd /Users/jtb/src/myproject && python -m pytest"
+  - name: "deploy"
+    command: "git push && ./deploy.sh"
+```
+“Sterling, run tests” → runs the command, reads back pass/fail summary via LLM.
+- Sandboxed subprocess with timeout
+- Config: `shortcuts` list with `name` + `command` pairs
+
+**Ollama Model Switcher**
+“Sterling, switch to big brain mode.” → hot-swaps to a larger model for a complex task.
+“Sterling, back to fast mode.” → back to the default model.
+No restart required — just changes `self._llm._model` and confirms the swap.
+- Config: named model aliases
+  ```yaml
+  llm:
+    model_aliases:
+      fast: "llama3.2:3b"
+      big: "llama3.1:8b"
+      code: "codellama:7b"
+  ```
+
+---
+
+### Developer Tools
+
+**Git Voice Control**
+“Sterling, what changed since yesterday?” → `git log --since=yesterday` → LLM summary.
+“Sterling, commit everything with message ‘fix auth bug’.” → runs `git add -A && git commit`.
+“Sterling, what branch am I on?” / “any uncommitted changes?”
+- Subprocess calls to git — no dependencies
+- Config: `git.repo_path`, `git.require_confirmation` for destructive ops
+
+**GitHub Integration**
+“Sterling, any open PRs?” / “Sterling, did the build pass?”
+GitHub REST API — PRs, CI status, issues, notifications.
+- `pip install PyGithub` or plain `httpx` calls
+- Config: `github.token`, `github.default_repo`
+
+**Code Review Partner**
+“Sterling, review auth dot py.” → Sterling reads the file, sends to LLM for a quick review.
+Good for a second opinion before committing. Works with any file in the workspace.
+- No new dependencies
+- Uses the existing code-generation LLM prompt in reverse
+
+**System Stats**
+“Sterling, what’s using the most CPU?” / “Sterling, how’s memory?”
+`psutil` reads live stats — LLM gives a one-sentence summary.
+“Ollama is using 4 GB, everything else is fine.”
+- `pip install psutil`
+- Also enables the battery alert from Proactive Alerts above
+
+**Build / Test Watcher**
+Run a build or test suite in the background. Sterling tells you when it finishes and whether it passed.
+Like a CI notification, but it just talks to you.
+- Background subprocess thread, stdout parsed for pass/fail signals
+- Config: `watcher.success_pattern`, `watcher.failure_pattern` (regex)
+
+---
+
+### Smart Home & Environment
+
+**Scene Presets**
+“Sterling, movie mode.” → dims lights to warm amber, pauses music.
+“Sterling, work mode.” → lights to full white, plays focus playlist.
+“Sterling, gaming mode.” → RGB chaos, whatever you want.
+Defined entirely in config — no code changes required:
+```yaml
+scenes:
+  movie:
+    lights: { brightness: 20, color: "warm white" }
+    spotify: { action: pause }
+  work:
+    lights: { brightness: 100, color: "white" }
+    spotify: { action: play, query: "focus music" }
+```
+
+**Do Not Disturb Mode**
+“Sterling, don’t interrupt me for 30 minutes.”
+Sterling won’t speak or acknowledge ambient sounds for the duration.
+Still responds if directly addressed. Auto-cancels after the timer expires.
+- Config: `dnd.default_minutes`
+
+**Sleep Mode**
+“Sterling, good night.” → dims lights to warm red, lowers TTS volume,
+stops responding to ambient triggers, optionally sets a morning alarm.
+- Combines scene presets + DND + volume control
+- Config: `sleep.light_color`, `sleep.light_brightness`, `sleep.volume`
+
+**Quiet Hours**
+Time-range config where Sterling automatically lowers volume and skips proactive alerts.
+So a 2am build completion doesn’t wake you up.
+```yaml
+quiet_hours:
+  enabled: true
+  start: "22:00"
+  end: "08:00"
+  volume_multiplier: 0.3   # 30% of normal volume
+  block_proactive: true    # no unsolicited speech
+```
+
+**Energy Awareness**
+Track how long lights have been on. Remind you if you’ve left a room occupied for N hours
+or if lights are still on in an empty room (presence detection + Govee combined).
+
+---
+
+### Fun & Personality
+
+**Sterling’s Opinions**
+Let Sterling actually have preferences and express them.
+“Sterling, what do you think of this approach?” → real opinion, not just a description.
+The personality is already set up in the system prompt — just lean into it more.
+Config: `personality.opinionated: true/false`
+
+**Explain Like I’m 5**
+“Sterling, ELI5 how OAuth works.”
+Forces the LLM into maximally simple explanation mode.
+Great shortcut for learning something new without reading a whole article.
+- One config phrase trigger, one system prompt modifier
+
+**Debate Mode**
+“Sterling, argue the other side.” → Sterling takes the opposite position on whatever
+you just said and pushes back intelligently. Good for stress-testing ideas and
+checking your assumptions. Toggle off with “ok, you can stop arguing.”
+
+**Daily Standup**
+“Sterling, standup.” → asks three questions:
+1. What did you do yesterday?
+2. What are you doing today?
+3. Any blockers?
+Logs your answers with timestamps to `standup.md`.
+Good for solo devs staying accountable. “4 days in a row — nice streak.”
+- Config: `standup.file`, `standup.questions` (customisable list)
+
+**“What Should I Work On?”**
+Sterling looks at your notes, recent git activity, open reminders, and the time of day
+and suggests a focus for the session. Basically just LLM + context injection,
+but it feels like having an actual project manager.
+“You’ve got a reminder about the API refactor, your last commit was 2 days ago,
+and it’s a Tuesday morning — sounds like a good time to tackle that.”
+
+**Language Practice Mode**
+“Sterling, let’s speak in Spanish for a bit.”
+Sterling switches language for the conversation. Immersive, low-stakes practice.
+- Config: `language_practice.supported_languages`
+- Auto-reverts after session or when you say “switch back to English”
+
+**Trivia / Quiz Mode**
+“Sterling, quiz me on Python.” → fires questions, tracks score, adjusts difficulty.
+Good for killing 10 minutes and actually learning something.
+
+---
+
+### Quality of Life
+
+**Hot-Reload Config**
+“Sterling, reload config.” → re-reads `config.yaml` without restarting.
+Change a phrase list, threshold, or response string and apply it live.
+- Zero new dependencies
+- Useful during tuning sessions
+
+**Per-Session Personality Override**
+“Sterling, be more formal today.”
+“Sterling, short answers only.”
+“Sterling, don’t make jokes for a bit.”
+Injects a temporary modifier into the system prompt for the current session.
+Resets on restart or when you say “back to normal.”
+
+**Multi-Device Audio Output**
+Route Sterling’s voice to a specific audio output device via config.
+Useful when you move between desk speakers and a Bluetooth speaker in another part of the room.
+- `sounddevice` or macOS `SwitchAudioSource` CLI
+- Config: `audio.output_device` (device name or index)
+
+**Web Search**
+Self-hosted SearXNG or a simple DuckDuckGo instant-answer fetch.
+“Sterling, search for...” → LLM gets actual current results, not just training data.
+Huge for anything time-sensitive: prices, news, documentation, release notes.
+- `httpx` call to SearXNG or DDG API — no heavy dependencies
+- Config: `search.provider`, `search.results_count`
+
+**Notification Mirroring**
+Pull macOS notifications or app webhooks and have Sterling mention important ones.
+“You got a Slack message from Tom.” / “Your GitHub Action failed.”
+Filter by app, sender, or keyword so it’s not constant noise.
+- `terminal-notifier` or macOS `osascript` for notification access
+- Config: `notifications.apps`, `notifications.keywords`, `notifications.quiet_hours`
+
+**Sterling Status HUD**
+A small always-on terminal panel (using `rich` or a tiny Tkinter window) showing:
+- Current mode (listening / thinking / speaking)
+- Last thing Sterling heard
+- Active timers
+- Presence status
+- System health (RAM, CPU, Ollama up/down)
+Optional — off by default, toggle with `--hud` flag.
+
+**Remote Access (iPhone / Anywhere)**
+Flask API layer on top of Sterling + Tailscale for remote access.
+Type or speak a question from your phone, get Sterling’s response back.
+Full write-up in section 9 (Remote Access).
+
+---
+
+## 8. Vision Roadmap — Medium Term & Detailed View
 
 ### What's live now (v1)
 
