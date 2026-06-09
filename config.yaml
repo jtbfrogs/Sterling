@@ -99,3 +99,31 @@ logging:
   level: "INFO"                 # DEBUG | INFO | WARNING | ERROR
   file: "sterling.log"          # Set to null to disable file logging
   console: true
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Gesture Detection (disabled by default — requires vision.enabled: true)
+# Detects: wave, hands_up, point_left, point_right via YOLOv8n-pose
+# pose model (~7 MB) downloads automatically on first use.
+# ──────────────────────────────────────────────────────────────────────────────
+gestures:
+  enabled: false                # Set true to activate background gesture monitoring
+  poll_interval: 1.0            # Seconds between gesture checks
+  sustain: 1.5                  # Seconds to hold gesture before it fires
+  confidence: 0.45              # Min keypoint confidence to trust
+  model: "yolov8n-pose.pt"      # Pose model weights (auto-downloaded on first use)
+  wave_action: "wake"           # wave: wake Sterling (alternative to saying wake word)
+  hands_up_action: "stop"       # hands_up: stop TTS + pause music
+  point_right_action: "next"    # point_right: Spotify next track
+  point_left_action: "prev"     # point_left: Spotify previous track
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Presence Detection (disabled by default — requires vision.enabled: true)
+# Runs a lightweight background check every N seconds.
+# ──────────────────────────────────────────────────────────────────────────────
+presence:
+  enabled: false                # Set true to monitor room occupancy
+  check_interval: 30            # Seconds between presence checks
+  greet_on_enter: false         # Speak "Welcome back" when you walk in
+  lights_on_enter: false        # Turn Govee lights on when person detected
+  lights_off_on_leave: false    # Turn lights off when room is empty
+  leave_delay: 300              # Seconds after leaving before triggering lights-off

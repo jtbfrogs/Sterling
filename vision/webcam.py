@@ -161,6 +161,10 @@ class WebcamVision:
                 "Install: brew install cmake && pip install dlib face_recognition"
             )
 
+        # Object tracker (lazy import to avoid circular deps)
+        from vision.object_tracker import ObjectTracker
+        self._tracker = ObjectTracker()
+
         # Capture state
         self._cap:             Optional[cv2.VideoCapture] = None
         self._frame:           Optional[np.ndarray]       = None
@@ -206,6 +210,10 @@ class WebcamVision:
         if self._cap:
             self._cap.release()
         logger.info("Webcam disconnected.")
+
+    def get_frame(self):
+        """Return the latest captured frame (np.ndarray or None)."""
+        return self._get_frame()
 
     def ping(self) -> bool:
         """Return True if the camera is open and delivering frames."""
@@ -263,120 +271,233 @@ class WebcamVision:
 
     def get_scene_description(self) -> str:
         """
-        Returns a plain-English scene description suitable for injecting into
-        LLM context.  Includes object identities, approximate positions
-        (left / centre / right, foreground / background), and a best-guess
-        at what the person might be holding based on spatial overlap with
-        the lower half of the person bounding box.
+        Single-pass scene description for LLM context injection.
+
+        One YOLO run per call.  Face recognition + expression analysis +
+        activity inference all happen on the same frame.  The object tracker
+        is updated as a side-effect so 'where's my X' queries work.
 
         Example output:
-            "person (centre, large — likely you); cell phone (centre,
-             foreground — possibly in hand); laptop (right, background);
-             coffee cup (left, foreground)"
+            "jtb (centre, large, smiling); cell phone (centre, medium —
+             possibly in hand); laptop (right, large). Activity: working
+             at a computer."
         """
         frame = self._get_frame()
         if frame is None:
             return "camera feed unavailable"
 
-        frame_h, frame_w = frame.shape[:2]
-        frame_area = frame_h * frame_w
+        fh, fw   = frame.shape[:2]
+        f_area   = fh * fw
 
+        # ── YOLO object detection ────────────────────────────────────────
         results = self._yolo(frame, verbose=False, conf=self._conf_thresh)
         boxes   = results[0].boxes
-
         if not boxes or len(boxes) == 0:
-            return "nothing detected in frame right now"
+            return "nothing detected right now"
 
-        # ── Parse all detections ──────────────────────────────────────────────
-        detections = []
-        person_box = None  # largest person box for hand-proximity check
+        detections: list[dict] = []
+        person_box  = None
         person_area = 0
 
         for box in boxes:
             cls_id = int(box.cls[0])
             label  = COCO_CLASSES[cls_id] if cls_id < len(COCO_CLASSES) else "unknown"
             x1, y1, x2, y2 = map(int, box.xyxy[0])
-            cx    = (x1 + x2) // 2
-            area  = (x2 - x1) * (y2 - y1)
+            cx   = (x1 + x2) // 2
+            area = (x2 - x1) * (y2 - y1)
+            ratio = area / f_area
 
-            # Horizontal position
-            if cx < frame_w * 0.33:
-                h_pos = "left"
-            elif cx > frame_w * 0.67:
-                h_pos = "right"
-            else:
-                h_pos = "centre"
-
-            # Depth proxy: bounding-box area vs frame area
-            ratio = area / frame_area
-            if ratio > 0.25:
-                depth = "large"
-            elif ratio > 0.06:
-                depth = "medium"
-            else:
-                depth = "small"
+            h_pos = "left" if cx < fw * 0.33 else ("right" if cx > fw * 0.67 else "centre")
+            depth = "large" if ratio > 0.25 else ("medium" if ratio > 0.06 else "small")
 
             detections.append({
-                "label": label,
-                "h_pos": h_pos,
-                "depth": depth,
-                "box":   (x1, y1, x2, y2),
-                "cx":    cx,
-                "area":  area,
+                "label": label, "h_pos": h_pos, "depth": depth,
+                "box": (x1, y1, x2, y2), "cx": cx, "area": area,
             })
-
             if label == "person" and area > person_area:
                 person_box  = (x1, y1, x2, y2)
                 person_area = area
 
-        # ── Apply face recognition labels ─────────────────────────────────────
-        if self._use_face_recog and self._known_encodings:
-            blocks = self._detect()   # full pipeline with face ID
-            label_map = {}
-            for b in blocks:
-                if b.label not in ("person", "unknown", ""):
-                    label_map[(b.x, b.y)] = b.label
-            for det in detections:
-                if det["label"] == "person":
-                    cx, cy = det["cx"], (det["box"][1] + det["box"][3]) // 2
-                    best = min(
-                        label_map.items(),
-                        key=lambda kv: abs(kv[0][0] - cx) + abs(kv[0][1] - cy),
-                        default=None,
-                    )
-                    if best and abs(best[0][0] - cx) < 120:
-                        det["label"] = best[1]
+        # ── Face recognition + expression (one pass) ─────────────────────
+        face_expressions: dict[int, str] = {}   # det-index → expression
+        if self._use_face_recog:
+            rgb       = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            locations = _fr.face_locations(rgb)
+            encodings = _fr.face_encodings(rgb, locations)
+            landmarks = _fr.face_landmarks(rgb, locations)
 
-        # ── Build description ─────────────────────────────────────────────────
-        parts = []
-        for det in sorted(detections, key=lambda d: -d["area"]):  # largest first
-            label = det["label"]
-            desc  = label
+            for i, (loc, enc) in enumerate(zip(locations, encodings)):
+                top, right, bottom, left = loc
+                face_cx = (left + right) // 2
+                face_cy = (top + bottom) // 2
 
-            # Positional context
-            pos_note = f"{det['h_pos']}, {det['depth']}"
+                # Identify name
+                name = "unknown"
+                if self._known_encodings:
+                    matches   = _fr.compare_faces(self._known_encodings, enc, tolerance=0.55)
+                    distances = _fr.face_distance(self._known_encodings, enc)
+                    if True in matches:
+                        best = int(np.argmin(distances))
+                        if matches[best]:
+                            name = self._known_names[best]
 
-            # "Holding" heuristic: non-person object whose box overlaps the
-            # lower 50 % of the largest person bounding box
+                # Map to nearest "person" detection
+                for idx, det in enumerate(detections):
+                    if det["label"] == "person":
+                        dcy = (det["box"][1] + det["box"][3]) // 2
+                        if abs(det["cx"] - face_cx) < 100 and abs(dcy - face_cy) < 100:
+                            det["label"] = name
+                            # Expression hint
+                            if i < len(landmarks):
+                                expr = self._estimate_expression(landmarks[i])
+                                if expr:
+                                    face_expressions[idx] = expr
+                            break
+
+        # ── Update object tracker (side-effect) ─────────────────────────
+        self._tracker.update(detections)
+
+        # ── Activity inference ─────────────────────────────────────────
+        activity = self._infer_activity(detections)
+
+        # ── Build description ───────────────────────────────────────────
+        person_labels = {"person", "unknown"} | set(self._known_names)
+        parts: list[str] = []
+
+        for idx, det in enumerate(sorted(
+            range(len(detections)), key=lambda i: -detections[i]["area"]
+        )):
+            d     = detections[idx]
+            label = d["label"]
+            pnote = f"{d['h_pos']}, {d['depth']}"
+
+            # Hand-holding heuristic
             in_hand = False
-            if person_box and label not in ("person", "unknown"):
+            if person_box and label not in person_labels:
                 px1, py1, px2, py2 = person_box
-                ox1, oy1, ox2, oy2 = det["box"]
-                hand_zone_top = py1 + (py2 - py1) * 0.5
-                horiz_overlap = max(0, min(px2, ox2) - max(px1, ox1))
-                if oy2 >= hand_zone_top and horiz_overlap > 0:
+                ox1, oy1, ox2, oy2 = d["box"]
+                hand_top   = py1 + (py2 - py1) * 0.5
+                h_overlap  = max(0, min(px2, ox2) - max(px1, ox1))
+                if oy2 >= hand_top and h_overlap > 0:
                     in_hand = True
 
-            if label in ("person", "unknown"):
-                note = f"{pos_note} — likely you" if det["depth"] == "large" else pos_note
+            if label in person_labels:
+                note = pnote
+                if d["depth"] == "large":
+                    note += " — likely you"
+                expr = face_expressions.get(idx, "")
+                if expr:
+                    note += f", {expr}"
             elif in_hand:
-                note = f"{pos_note} — possibly in hand"
+                note = f"{pnote} — possibly in hand"
             else:
-                note = pos_note
+                note = pnote
 
-            parts.append(f"{desc} ({note})")
+            parts.append(f"{label} ({note})")
 
-        return "; ".join(parts) if parts else "nothing clearly identifiable"
+        desc = "; ".join(parts) if parts else "nothing clearly identifiable"
+        if activity:
+            desc += f". Activity: {activity}."
+        return desc
+
+    def enroll_face(self, name: str) -> str:
+        """
+        Capture the current frame, verify a face is present, and save it
+        as vision/faces/{name}.jpg.  Re-loads encodings immediately so
+        the person is recognised without restarting Sterling.
+
+        Returns a plain-English result suitable for LLM context injection.
+        """
+        frame = self._get_frame()
+        if frame is None:
+            return "camera unavailable — cannot save face"
+        if not FACE_RECOGNITION_AVAILABLE:
+            return "face recognition not installed"
+
+        rgb       = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        locations = _fr.face_locations(rgb)
+        if not locations:
+            return "no face detected — make sure your face is clearly visible and try again"
+
+        self._known_faces_dir.mkdir(parents=True, exist_ok=True)
+        safe = re.sub(r"[^a-zA-Z0-9_]", "", name.lower().replace(" ", "_"))
+        path = self._known_faces_dir / f"{safe}.jpg"
+        cv2.imwrite(str(path), frame)
+        logger.info(f"Face enrolled: {safe} → {path}")
+
+        # Reload without restart
+        self._known_encodings = []
+        self._known_names     = []
+        if self._use_face_recog:
+            self._load_known_faces()
+
+        return f"face saved as '{safe}' — I'll recognise them from now on"
+
+    def check_presence(self) -> bool:
+        """Return True if a person is currently visible in frame."""
+        try:
+            blocks, _ = self.get_all()
+            return any(
+                b.label in ("person", "unknown") or b.is_learned
+                for b in blocks
+            )
+        except Exception:
+            return False
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Expression + activity helpers
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _estimate_expression(self, landmarks: dict) -> str:
+        """
+        Estimate a basic expression from dlib face landmark points.
+        Only returns "smiling" when confident; otherwise empty string
+        to avoid false negatives cluttering the scene description.
+        """
+        top_lip = landmarks.get("top_lip", [])
+        if len(top_lip) < 7:
+            return ""
+        try:
+            # Image coords: y increases downward.
+            # A smile pulls corners (idx 0, 6) UP → lower y values than centre (idx 3).
+            corner_avg = (top_lip[0][1] + top_lip[6][1]) / 2
+            centre_y   = top_lip[3][1]
+
+            # Normalize by approximate face height
+            chin = landmarks.get("chin", [])
+            face_h = abs(chin[-1][1] - chin[0][1]) if len(chin) >= 2 else 100
+
+            if face_h < 10:
+                return ""
+
+            diff = (centre_y - corner_avg) / face_h   # positive → smile
+            return "smiling" if diff > 0.04 else ""
+        except Exception:
+            return ""
+
+    def _infer_activity(self, detections: list[dict]) -> str:
+        """
+        Infer what the person is doing from detected object combinations.
+        Returns a short phrase, or empty string if nothing clear.
+        """
+        labels = {d["label"] for d in detections}
+        person_labels = {"person", "unknown"} | set(self._known_names)
+        has_person = bool(labels & person_labels)
+        if not has_person:
+            return ""
+
+        if "laptop" in labels:
+            return "working at a computer" if ("mouse" in labels or "keyboard" in labels) else "at a laptop"
+        if "cell phone" in labels:
+            phone = next((d for d in detections if d["label"] == "cell phone"), None)
+            return "on the phone" if (phone and phone["depth"] == "large") else "using a phone"
+        if "book" in labels:
+            return "reading"
+        if any(l in labels for l in ("cup", "bottle", "wine glass")):
+            return "having a drink"
+        if "remote" in labels and "tv" in labels:
+            return "watching TV"
+        return ""
 
     # ─────────────────────────────────────────────────────────────────────────
     # Detection internals

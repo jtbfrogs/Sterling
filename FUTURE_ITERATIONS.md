@@ -539,3 +539,157 @@ A basic HTML page served by Flask. Text input, send button, response display. Wo
 
 *Updated May 2026 — M1 Mac v1 operational with lights, Spotify, weather, and wake word interruption. Jetson Orin Nano owned — migration planned.*
 **Sterling Project**
+
+---
+
+## 10. Vision Roadmap — Medium Term & Detailed View
+
+### What's live now (v1)
+
+| Feature | Status |
+|---|---|
+| YOLO object detection (80 COCO classes) | ✅ Live |
+| Face recognition (dlib + face_recognition) | ✅ Live |
+| Scene description → LLM context injection | ✅ Live |
+| Expression hints (smile detection via lip landmarks) | ✅ Live |
+| Activity inference from object combos | ✅ Live |
+| Object tracking (last-seen position, JSON-backed) | ✅ Live |
+| Face enrollment by voice ("remember this person as X") | ✅ Live |
+| Presence detection (optional background monitor) | ✅ Live |
+| Gesture commands — wave / hands up / point (YOLOv8-pose) | ✅ Live (opt-in) |
+
+---
+
+### "More Detailed View" — Vision-Language Model (VLM)
+
+**This is the single highest-leverage upgrade for the camera.**
+
+Currently Sterling's vision pipeline is:
+```
+Camera frame → YOLO → list of labels + positions → text description → LLM
+```
+The LLM **never sees the actual image** — it just reads a text summary like
+"cell phone (centre, small — possibly in hand)."  YOLO can only report the
+80 object classes it was trained on; it misses pens, papers, expressions,
+text, logos, food, gestures, and anything unusual.
+
+With a Vision-Language Model the pipeline becomes:
+```
+Camera frame → VLM (sees actual pixels) → natural language response
+```
+
+**Available right now via Ollama:**
+
+| Model | Size | Quality | Notes |
+|---|---|---|---|
+| `moondream` | 1.7 GB | Good for simple queries | Fastest, runs fine on M1 8 GB |
+| `llava:7b` | 4.1 GB | Excellent | Best balance on M1 |
+| `llava:13b` | 8.0 GB | Near-GPT4V quality | Needs Jetson or 16 GB Mac |
+| `llava-phi3` | 2.9 GB | Very good | Phi-3 backbone, efficient |
+
+**How it works:**
+```python
+import base64, cv2, httpx
+
+frame = vision.get_frame()
+_, buf = cv2.imencode(".jpg", frame)
+b64 = base64.b64encode(buf).decode()
+
+resp = httpx.post("http://localhost:11434/api/generate", json={
+    "model": "moondream",
+    "prompt": "What is this person holding? Describe briefly.",
+    "images": [b64],
+    "stream": False,
+})
+answer = resp.json()["response"]
+```
+
+**What it unlocks that YOLO can't do:**
+- "What am I holding?" — accurately reads text on labels, identifies specific items
+- "How do I look?" — reads actual facial expression, not just lip geometry
+- "What's on my screen?" — reads the actual display content
+- "What's written on that?" — OCR without a separate model
+- "Describe the mood in the room" — holistic understanding
+- Any open-ended visual question
+
+**Cost:** VLM inference takes 2–5 seconds on M1 (vs ~100 ms for YOLO).  Good for
+on-demand queries, not continuous monitoring.  YOLO stays for background tasks;
+VLM fires when the user asks a specific visual question.
+
+**Implementation plan (medium term):**
+1. `ollama pull moondream` (1.7 GB, fits in M1 8 GB alongside llama3.2:3b)
+2. Add `core/vlm.py` — wraps Ollama's vision endpoint
+3. In `main.py`, if `_is_vision_query()` and VLM is configured, route to VLM
+   instead of YOLO scene description
+4. Config flag: `vision.vlm_model: "moondream"` (empty = use YOLO)
+
+---
+
+### Medium-Term Vision Features
+
+**Thumbs up / thumbs down gestures**
+YOLOv8-pose only gives 17 body keypoints (wrists, elbows, shoulders etc.) — not
+finger-level.  Thumb direction needs a dedicated hand-landmark model.
+- **MediaPipe Hands** — 21 finger keypoints, runs well on M1 CPU.  Python 3.14
+  support is limited; check `pip install mediapipe` and test.
+- **YOLOv8n-pose → finger ext.** — there are fine-tuned models that add hand
+  keypoints on top of body pose.
+- Once finger keypoints are available: thumb pointing up above fist = thumbs up,
+  below = thumbs down.
+
+**OCR — reading text in frame**
+```bash
+pip install pytesseract
+brew install tesseract
+```
+"What does that say?" → capture frame → `pytesseract.image_to_string(frame)` →
+inject into LLM.  Works for books, whiteboards, screens, labels, sticky notes.
+
+**Scene change alerts (passive monitoring)**
+Background frame-differencing (cheap — no YOLO):
+- Compare current frame to a reference frame every N seconds
+- If pixel difference > threshold, run YOLO to classify what changed
+- Alert: "Something moved on the right side of the room"
+- Useful as a lightweight intruder / pet detection without continuous YOLO
+
+**Person-specific context on recognition**
+When a known face is detected, auto-pull that person's last conversation or notes
+from memory.json.  "Oh hey James — last time we talked you were working on the
+authentication bug."  Needs face recognition + memory integration.
+
+**Multi-camera support**
+Multiple `WebcamVision` instances (different `device_index` values).
+Each reports independently; LLM gets a combined scene description.
+Useful for: desk cam + doorbell cam, or room coverage.
+
+**Depth estimation (single camera)**
+MiDaS (via torch hub) can estimate relative depth from a single RGB image.
+"That cup is about arm's reach away on your left."
+Adds genuine spatial awareness without a depth camera.
+~100 ms on M1 CPU for MiDaS-Small.
+
+**Activity recognition (expanded)**
+Current: simple object-combo heuristics.
+Medium term: YOLOv8-pose skeleton + temporal analysis.
+- Sitting posture + laptop = focused work
+- Walking (keypoints moving) = in motion
+- Leaning back = relaxed / resting
+Needs storing a short sequence of frames, not just the latest.
+
+**Timeline / visual log**
+Save a timestamped thumbnail when notable events occur:
+- Face recognised (save who + when)
+- New object detected for the first time in a while
+- Room occupancy changes
+Ask "what was happening at 3pm?" → Sterling describes from the visual log.
+Low storage cost: save 1 frame per event as a small JPEG.
+
+**Screen awareness (desktop)**
+`mss` (cross-platform screenshot) → send to VLM:
+"Sterling, what's on my screen?" — reads the actual desktop.
+"Sterling, explain this error" — you Alt-Tab to the terminal, ask Sterling.
+No camera required — uses the VLM pipeline above.
+
+---
+
+*Vision roadmap last updated: 2026-06*

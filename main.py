@@ -113,9 +113,14 @@ class Sterling:
         self._init_llm()
         self._init_tts()
         self._init_vision(enable_vision)
+        self._init_gesture()
         self._init_govee()
         self._init_spotify()
         self._init_workspace()
+
+        # Gesture wake flag — set by wave callback to trigger an interaction
+        import threading as _threading
+        self._gesture_wake = _threading.Event()
 
         logger.info("All subsystems ready.")
 
@@ -228,6 +233,81 @@ class Sterling:
             logger.warning(f"  Vision unavailable: {e}")
             logger.warning("  Continuing without vision. Check camera is connected.")
 
+    def _init_gesture(self):
+        """Initialise gesture detection if enabled in config."""
+        self._gesture: "GestureDetector | None" = None
+        g_cfg = self._config.get("gestures", {})
+
+        if not g_cfg.get("enabled", False):
+            logger.info("  Gesture detection disabled (set gestures.enabled: true to activate)")
+            return
+
+        if not self._vision:
+            logger.warning("  Gesture detection requires vision — skipping.")
+            return
+
+        try:
+            from vision.gesture import GestureDetector
+            self._gesture = GestureDetector(
+                frame_fn       = self._vision.get_frame,
+                model_size     = g_cfg.get("model", "yolov8n-pose.pt"),
+                poll_interval  = g_cfg.get("poll_interval", 1.0),
+                sustain_seconds= g_cfg.get("sustain", 1.5),
+                confidence     = g_cfg.get("confidence", 0.45),
+            )
+            logger.info("✓ Gesture detector initialised (starts at run time)")
+        except Exception as e:
+            logger.warning(f"  Gesture detection unavailable: {e}")
+
+    def _start_gesture_monitor(self):
+        """Register gesture callbacks and start the detector thread."""
+        if not self._gesture:
+            return
+
+        g_cfg    = self._config.get("gestures", {})
+        wave_act = g_cfg.get("wave_action",        "wake")
+        hu_act   = g_cfg.get("hands_up_action",    "stop")
+        pr_act   = g_cfg.get("point_right_action", "next")
+        pl_act   = g_cfg.get("point_left_action",  "prev")
+
+        def _wave():
+            logger.info("Gesture: wave — waking Sterling")
+            if wave_act == "wake":
+                self._gesture_wake.set()
+
+        def _hands_up():
+            logger.info("Gesture: hands up — stopping audio")
+            if hu_act == "stop":
+                self._tts.stop()
+                if self._spotify:
+                    try:
+                        self._spotify.pause()
+                    except Exception:
+                        pass
+
+        def _point_right():
+            logger.info("Gesture: point right — next track")
+            if pr_act == "next" and self._spotify:
+                try:
+                    self._spotify.skip()
+                except Exception:
+                    pass
+
+        def _point_left():
+            logger.info("Gesture: point left — previous track")
+            if pl_act == "prev" and self._spotify:
+                try:
+                    self._spotify.previous()
+                except Exception:
+                    pass
+
+        self._gesture.on_gesture("wave",        _wave)
+        self._gesture.on_gesture("hands_up",    _hands_up)
+        self._gesture.on_gesture("point_right", _point_right)
+        self._gesture.on_gesture("point_left",  _point_left)
+        self._gesture.start()
+        logger.info("✓ Gesture monitor active")
+
     def _init_workspace(self):
         self._workspace: Workspace | None = None
         ws_cfg = self._config.get("workspace", {})
@@ -320,6 +400,11 @@ class Sterling:
         # from it sequentially — no open/close, no two-stream conflict (err=-50).
         self._recorder.enable_shared_mode()
         self._wake_word.start(external_read=self._recorder.read_raw)
+
+        # Start optional background monitors
+        self._start_gesture_monitor()
+        self._start_presence_monitor()
+
         logger.info("Listening for wake word...")
         logger.info("-" * 60)
 
@@ -340,10 +425,63 @@ class Sterling:
         finally:
             self.shutdown()
 
+    def _start_presence_monitor(self):
+        """Optional background thread — detects when someone enters/leaves."""
+        p_cfg = self._config.get("presence", {})
+        if not p_cfg.get("enabled", False) or not self._vision:
+            return
+
+        import threading, time as _time
+        interval     = p_cfg.get("check_interval", 30)
+        greet        = p_cfg.get("greet_on_enter", False)
+        lights_on    = p_cfg.get("lights_on_enter", False)
+        lights_off   = p_cfg.get("lights_off_on_leave", False)
+        leave_delay  = p_cfg.get("leave_delay", 300)
+
+        def _monitor():
+            was_present = False
+            while self._running:
+                _time.sleep(interval)
+                try:
+                    is_present = self._vision.check_presence()
+                except Exception:
+                    continue
+
+                if is_present and not was_present:
+                    logger.info("Presence: person detected — room occupied.")
+                    if lights_on and self._govee and self._govee.has_devices:
+                        try:
+                            self._govee.turn_on()
+                        except Exception:
+                            pass
+                    if greet and self._running:
+                        self._tts.speak("Welcome back.")
+
+                elif not is_present and was_present:
+                    logger.info("Presence: room appears empty.")
+                    if lights_off and self._govee and self._govee.has_devices:
+                        _time.sleep(leave_delay)
+                        if not self._vision.check_presence():
+                            try:
+                                self._govee.turn_off()
+                                logger.info("Presence: lights off (room still empty).")
+                            except Exception:
+                                pass
+
+                was_present = is_present
+
+        threading.Thread(target=_monitor, daemon=True, name="sterling-presence").start()
+        logger.info(f"✓ Presence monitor active (every {interval}s)")
+
     def _run_loop(self):
         """Wake-word → interaction loop. Runs in a daemon thread."""
         try:
             while self._running:
+                # Gesture wave can trigger an interaction without a wake phrase
+                if self._gesture_wake.is_set():
+                    self._gesture_wake.clear()
+                    self._handle_interaction()
+                    continue
                 if self._wake_word.listen():
                     self._handle_interaction()
         except Exception as e:
@@ -426,6 +564,36 @@ class Sterling:
 
             # Track which intent fired so later parsers can skip
             intent_handled = False
+
+            # Face enrollment — "remember this person as James"
+            enroll_name = self._parse_enroll_intent(text)
+            if enroll_name and self._vision:
+                result = self._vision.enroll_face(enroll_name)
+                llm_inject = f"{text}\n\n[Face enrollment result: {result}]"
+                self._memory.add_user(llm_inject)
+                logger.info(f"Face enrollment: {result}")
+                full_response = ""
+                if self._llm_stream:
+                    full_response, was_interrupted = self._speak_interruptible(
+                        self._tts.speak_streaming,
+                        self._llm.stream(self._memory.get_messages()),
+                    )
+                if full_response:
+                    self._memory.add_assistant(full_response)
+                intent_handled = True
+                if winding_down:
+                    break
+                continue
+
+            # Object tracking — "where's my phone / have you seen my keys"
+            if not intent_handled and self._vision and self._is_tracking_query(text):
+                result = self._vision._tracker.find(text)
+                if result:
+                    llm_inject = f"{text}\n\n[Object tracking: {result}]"
+                else:
+                    llm_inject = f"{text}\n\n[Object tracking: I haven't seen that item yet. It will be tracked next time it's visible on camera.]"
+                text = llm_inject   # feed into LLM below
+                intent_handled = True
 
             # Spotify control - execute immediately, let LLM respond naturally
             spotify_context = None
@@ -889,6 +1057,41 @@ class Sterling:
         except Exception as e:
             logger.error(f"Code generation failed: {e}")
             return ""
+
+    def _parse_enroll_intent(self, text: str) -> str | None:
+        """
+        Detect a voice request to enrol a new face.
+        Returns the name to save, or None.
+
+        Triggers on phrases like:
+            "remember this person as James"
+            "save this face as Sarah"
+            "enroll this person as Dad"
+        """
+        t = text.lower().strip()
+        patterns = [
+            r"remember (?:this person|this face|them|him|her) as ([\w\s]+)",
+            r"save (?:this person|this face|them|him|her) as ([\w\s]+)",
+            r"enrol(?:l)? (?:this person|this face|them|him|her) as ([\w\s]+)",
+            r"(?:call|name) (?:this person|them|him|her) ([\w\s]+)",
+            r"(?:that'?s?|this is) ([\w]+)(?: right)?",   # "that's James" — short form
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, t)
+            if m:
+                name = m.group(1).strip().rstrip(".!?").strip()
+                if 1 < len(name) < 30 and name not in ("me", "you", "us", "him", "her"):
+                    return name
+        return None
+
+    def _is_tracking_query(self, text: str) -> bool:
+        """Returns True if the user is asking where an object was last seen."""
+        t = text.lower()
+        return any(phrase in t for phrase in [
+            "where's my", "where is my", "where did i put",
+            "have you seen my", "seen my", "find my",
+            "where did i leave", "where are my",
+        ])
 
     def _is_vision_query(self, text: str) -> bool:
         """
