@@ -403,9 +403,9 @@ class Sterling:
         )
         self._tts.speak(startup_msg)
 
-        # Enable shared audio stream: one persistent CoreAudio input for the
+        # Enable shared audio stream: one persistent WASAPI/WDM input for the
         # entire session.  Wake-word detection and recording take turns reading
-        # from it sequentially — no open/close, no two-stream conflict (err=-50).
+        # from it sequentially — no open/close, no two-stream conflict.
         self._recorder.enable_shared_mode()
         self._wake_word.start(external_read=self._recorder.read_raw)
 
@@ -417,7 +417,7 @@ class Sterling:
         logger.info("-" * 60)
 
         # Run the blocking wake-word loop in a daemon thread.
-        # PyAudio's stream.read() is a blocking C call - on macOS it swallows
+        # PyAudio's stream.read() is a blocking C call — it swallows
         # Ctrl+C because Python only delivers signals between bytecode instructions,
         # not during C extension calls. Keeping the main thread in a Python-level
         # join(timeout) loop means Ctrl+C always gets through.
@@ -525,7 +525,7 @@ class Sterling:
 
         Stream discipline: the wake word stream is already PAUSED when this
         runs. listen_for_speech() opens and fully closes its own stream so
-        CoreAudio never sees two simultaneous input streams.
+        Windows never sees two simultaneous input streams.
         """
         conv_cfg  = self._config.get("conversation", {})
         timeout   = conv_cfg.get("timeout", 20)   # seconds of silence before sleeping
@@ -858,10 +858,10 @@ class Sterling:
 
         Swaps the microphone from the recorder to the wake word detector
         for the duration of playback - the only safe way to run both
-        wake word detection and recording without CoreAudio conflicts.
+        wake word detection and recording without audio stream conflicts.
 
         A background thread calls wake_word.listen() in a loop. If the
-        wake phrase is detected, stop_event is set and TTS kills afplay
+        wake phrase is detected, stop_event is set and pygame stops
         within its 50 ms poll cycle.
 
         Returns:
@@ -1490,7 +1490,7 @@ def main():
     def handle_sigint(signum, frame):
         print()
         # Save memory then force-exit immediately.
-        # PyAudio's Pa_StopStream can deadlock on macOS if we wait for
+        # PyAudio's Pa_StopStream can deadlock if we wait for
         # the graceful shutdown path — os._exit bypasses that entirely.
         try:
             sterling._memory.end_session()

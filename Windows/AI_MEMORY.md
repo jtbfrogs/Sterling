@@ -6,10 +6,11 @@
 ## Project
 **Name:** Sterling — Jarvis-inspired local AI room assistant  
 **Owner:** jtb  
-**CWD:** `/Users/jtb/src/sterling`  
-**Venv:** `ster/` (activate: `source ster/bin/activate`)  
-**Status:** M1 Mac v1 — fully operational, all integrations live
-**Last session:** 2026-06-14 — major overhaul: memory rewrite, context-pollution fix, self-echo interrupt suppression, VLM vision hook, facts store (see Key Decisions)
+**CWD (Mac dev):** `/Users/jtb/src/sterling`  
+**CWD (Windows):** Windows folder is the active build target  
+**Venv:** `ster/` (Mac: `source ster/bin/activate` | Windows: `ster\Scripts\activate`)  
+**Status:** M1 Mac v1 fully operational. Windows build — code ported, setup guide written, ready to deploy.
+**Last session:** 2026-06-20 — Windows port: TTS afplay→pygame, say→pyttsx3, config updated for RTX 3060 (CUDA, large-v3 STT, qwen2.5:7b LLM), WINDOWS_SETUP.md created, setup_windows.bat created
 
 ---
 
@@ -27,6 +28,21 @@
 | Memory | JSON archive (ChromaDB broken on Python 3.14 — falls back gracefully) |
 | Audio | Single shared PyAudio stream (wake word + recorder share one CoreAudio input) |
 | Config | `config.yaml` (gitignored — has API keys) |
+
+## Stack (Windows v2 — RTX 3060 12 GB / 16 GB RAM)
+| Layer | Tech |
+|---|---|
+| Wake Word | Faster-Whisper `tiny` + energy VAD, CPU, int8 (unchanged) |
+| STT | Faster-Whisper `large-v3`, **CUDA**, float16 |
+| LLM | Ollama + `qwen2.5:7b` via `http://localhost:11434` (CUDA auto) |
+| TTS | Edge-TTS `en-GB-RyanNeural` + **pygame.mixer** playback + **pyttsx3** fallback |
+| Lights | Govee cloud HTTP API (unchanged) |
+| Music | Spotify Web API via spotipy (unchanged) |
+| Weather | wttr.in (unchanged) |
+| Vision | USB webcam + YOLOv8n/s + face_recognition + object tracker + gesture detector |
+| Memory | JSON archive + keyword recall (ChromaDB optional on Python 3.11) |
+| Audio | Single shared PyAudio stream (WASAPI backend on Windows) |
+| Config | `config.yaml` — Windows version with CUDA settings |
 
 ---
 
@@ -172,7 +188,11 @@ recorder.open_stream()      ← no-op in shared mode
 ---
 
 ## Hardware (Owner)
-- **Current:** M1 Mac 8GB — dev/daily driver
+- **Mac dev machine:** M1 Mac 8GB — original dev/daily driver
+- **Windows target:** RTX 3060 12 GB / 16 GB RAM — Windows build live
+  - TTS: `afplay`→`pygame.mixer`, `say`→`pyttsx3`
+  - STT: large-v3 on CUDA (was base on CPU)
+  - LLM: qwen2.5:7b (was llama3.2:3b)
 - **Planned:** Jetson Orin Nano (owned)
   - TTS: Edge-TTS → Piper (offline)
   - systemd service for boot-time auto-start
@@ -181,17 +201,22 @@ recorder.open_stream()      ← no-op in shared mode
 ---
 
 ## Needs / Next Up
-- [ ] Enrol jtb's face in `vision/faces/jtb.jpg` for face recognition
+- [ ] **Windows: Deploy and boot-test** — install Python 3.11, CUDA, Ollama, run setup_windows.bat
+- [ ] **Windows: PyAudio install** — may need pipwin or pre-built wheel on Windows
+- [ ] **Windows: Verify pygame audio playback** — test speak() and speak_streaming()
+- [ ] **Windows: Verify CUDA** — `python -c "import torch; print(torch.cuda.is_available())"`
+- [ ] Enrol face in `vision/faces/` for face recognition
 - [ ] Tune `silence_threshold` and `wake_word.energy_threshold` for mic/room acoustics
 - [ ] Enable gestures (`gestures.enabled: true`) and test wave-to-wake
 - [ ] Enable presence detection (`presence.enabled: true`) and tune `check_interval`
-- [ ] Check Jetson RAM: `free -h` — 4GB vs 8GB determines LLM model
-- [ ] Jetson migration: JetPack 6, Ollama ARM, Piper TTS, systemd service
+- [ ] Wire in Kokoro-82M offline TTS (hooks ready, not yet integrated)
+- [ ] Enable ChromaDB semantic memory on Python 3.11 (`chroma_enabled: true`)
+- [ ] Pull moondream VLM: `ollama pull moondream` → set `vlm_model: "moondream"` in config
+- [ ] Try `qwen2.5:14b` if 7b feels too basic (8.7 GB VRAM — tight with vision, fine without)
 - [ ] Implement timers/reminders (top of backlog — high daily value)
 - [ ] Implement morning briefing (second priority — peak Jarvis moment)
 - [ ] Implement clipboard assistant (`pip install pyperclip` — trivial, huge dev QoL)
-- [ ] VLM upgrade: `ollama pull moondream` → replace YOLO text description with actual pixel vision
-- [ ] **Upgrade LLM from `llama3.2:3b` to `qwen2.5:7b`** (recommended) or `mistral:7b` — llama3.2:3b too small for reliable context following; `qwen2.5:7b` (4.4 GB) fits M1 8GB comfortably alongside camera/audio
+- [ ] Jetson migration: JetPack 6, Ollama ARM, Piper TTS, systemd service
 
 ---
 

@@ -121,7 +121,7 @@ class WakeWordDetector:
                 If provided, the detector reads audio via this function instead
                 of opening its own PyAudio stream.  Pass recorder.read_raw to
                 share the recorder’s persistent stream — one stream for the
-                whole session, no CoreAudio conflicts, zero switching latency.
+                whole session, no audio stream conflicts, zero switching latency.
         """
         self._external_read = external_read
         logger.info(
@@ -242,13 +242,13 @@ class WakeWordDetector:
         """
         Spawn a lightweight interruption monitor that reuses the EXISTING
         wake word PyAudio stream — no second PyAudio instance is opened,
-        so there is no CoreAudio mutex deadlock.
+        so there is no audio mutex deadlock.
 
         Safe because listen() is never called concurrently: the main loop
         is inside _handle_interaction() while this monitor runs.
 
         When sustained speech is detected (user interrupting), sets
-        stop_event so TTS kills afplay within its 50 ms polling cycle.
+        stop_event so TTS (pygame) stops within its 50 ms polling cycle.
 
         Args:
             stop_event:           Event shared with TTS.speak_streaming().

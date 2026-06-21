@@ -18,6 +18,9 @@ config.yaml
 # Persistent memory — contains private conversation history
 memory.json
 memory.tmp
+facts.json
+facts.tmp
+object_tracker.json
 
 # Temp audio files
 /tmp/sterling_*.mp3

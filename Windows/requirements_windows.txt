@@ -1,0 +1,88 @@
+# ============================================================
+# Sterling — Windows Requirements
+# RTX 3060 12 GB / 16 GB RAM build
+# Python 3.11 recommended (3.12 works, 3.14 has issues with some C extensions)
+#
+# INSTALL ORDER MATTERS — read the numbered steps in WINDOWS_SETUP.md first.
+#
+# Quick install (after prerequisites are done):
+#   pip install -r requirements_windows.txt
+#
+# Prerequisites (install BEFORE pip install):
+#   1. CUDA Toolkit 12.x  → https://developer.nvidia.com/cuda-downloads
+#   2. Ollama for Windows  → https://ollama.ai  (grab the .exe installer)
+#   3. PyTorch CUDA build  → installed via pip below
+#   4. Microsoft C++ Build Tools (needed for dlib / face_recognition)
+#      → https://visualstudio.microsoft.com/visual-cpp-build-tools/
+#      → select "Desktop development with C++"
+# ============================================================
+
+# ─── PyTorch — CUDA build (install FIRST, before ultralytics/faster-whisper) ───
+# This gives you GPU support for YOLO and Whisper.
+# If the version below is stale, get the current command from: https://pytorch.org
+torch>=2.2.0
+torchvision>=0.17.0
+torchaudio>=2.2.0
+# NOTE: after `pip install -r requirements_windows.txt`, run:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# That replaces the CPU torch above with the CUDA build. (pip can't do index-url in requirements.txt)
+
+# ─── LLM ───────────────────────────────────────────────────────────────────────
+ollama>=0.3.0
+
+# ─── Speech to Text (Faster-Whisper) ───────────────────────────────────────────
+# Automatically uses CUDA when torch+CUDA is installed and config says device: cuda
+faster-whisper>=1.0.0
+
+# ─── Text to Speech ────────────────────────────────────────────────────────────
+# Primary: Edge-TTS (Microsoft neural voices, requires internet)
+edge-tts>=6.1.0
+
+# Offline fallback: pyttsx3 uses Windows SAPI (built into Windows, no download)
+pyttsx3>=2.90
+
+# Audio playback: replaces macOS afplay. pygame handles .mp3 natively on Windows.
+pygame>=2.5.0
+
+# ─── Audio I/O ─────────────────────────────────────────────────────────────────
+# PyAudio on Windows: download the pre-built wheel from
+#   https://www.lfd.uci.edu/~gohlke/pythonlibs/#pyaudio
+# or install via pipwin:
+#   pip install pipwin && pipwin install pyaudio
+# If neither works: conda install pyaudio
+pyaudio>=0.2.14
+numpy>=1.24.0
+
+# ─── Vision (Webcam + YOLO + Face Recognition) ─────────────────────────────────
+# ultralytics downloads YOLO weights automatically on first use
+ultralytics>=8.0.0
+opencv-python>=4.8.0
+
+# face_recognition requires dlib — pre-built Windows wheel:
+#   pip install dlib (may work directly on Python 3.11)
+#   If it fails: download the .whl from https://github.com/z-mahmud22/Dlib_Windows_Python3.x
+#   then: pip install dlib-19.x.x-cpXXX-win_amd64.whl
+# After dlib: pip install face_recognition
+# dlib
+# face_recognition
+
+# ─── Smart Lights ──────────────────────────────────────────────────────────────
+requests>=2.31.0
+
+# ─── Spotify ───────────────────────────────────────────────────────────────────
+spotipy>=2.26.0
+
+# ─── Configuration ─────────────────────────────────────────────────────────────
+pyyaml>=6.0.0
+
+# ─── Optional: Semantic Memory (ChromaDB) ──────────────────────────────────────
+# Works on Python 3.11 on Windows. Better long-term memory than keyword recall.
+# Enable in config.yaml: chroma_enabled: true
+# chromadb>=0.5.0
+# sentence-transformers>=3.0.0
+
+# ─── Optional: Offline TTS (Kokoro-82M) ────────────────────────────────────────
+# High-quality offline TTS, sounds close to Edge-TTS, no internet needed.
+# See WINDOWS_SETUP.md for wiring instructions.
+# kokoro>=0.9.2
+# soundfile>=0.12.0

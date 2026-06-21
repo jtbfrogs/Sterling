@@ -1,0 +1,25 @@
+# Webcam Vision Example — Dependencies
+#
+# Install:
+#   pip install -r examples/webcam_vision/requirements.txt
+#
+# Note on face_recognition:
+#   Requires dlib to be compiled first.
+#
+#   M1 Mac:
+#     brew install cmake
+#     pip install dlib
+#     pip install face_recognition
+#
+#   Jetson (JetPack 6):
+#     pip install dlib   # picks up CUDA automatically
+#     pip install face_recognition
+#
+#   Windows:
+#     pip install dlib   # pre-built wheel usually works
+#     pip install face_recognition
+
+ultralytics>=8.0.0
+opencv-python>=4.8.0
+face_recognition>=1.3.0
+numpy>=1.24.0

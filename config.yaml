@@ -9,8 +9,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 sterling:
   name: "Sterling"
-  startup_message:  "Sterling online, how can I assist you?"
-  shutdown_message: "Understood. Powering down. Goodbye."
+  startup_message:  "Sterling = online, waiting for wake word!"
+  shutdown_message: "Understood. Powering down. See you later."
 
   # Spoken when the wake word fires and Sterling is ready to listen
   ack_message: "Yes?"
@@ -20,6 +20,12 @@ sterling:
 
   # Spoken after "clear memory" command
   memory_clear_message: "Memory cleared. I've forgotten our previous conversation. Starting fresh."
+
+  # Spoken after "remember that ..." stores a durable fact
+  fact_saved_message: "Got it. I'll remember that."
+
+  # Spoken after "forget what you know about me"
+  forget_facts_message: "Done. I've cleared what I knew about you."
 
   # Template for session-status response  ({duration} and {turns} are filled in)
   session_duration_response: "We've been talking for {duration}, across {turns} exchanges."
@@ -48,13 +54,19 @@ commands:
     - "goodbye"
     - "talk later"
 
-  # Wipe the in-session conversation window (JSON + ChromaDB NOT wiped)
+  # Wipe the in-session conversation window (JSON archive + facts NOT wiped)
   memory_clear:
     - "clear memory"
     - "clear your memory"
-    - "forget everything"
     - "reset conversation"
     - "start fresh"
+
+  # Wipe the durable facts store (things you asked Sterling to remember)
+  forget_facts:
+    - "forget what you know about me"
+    - "forget my facts"
+    - "delete what you know about me"
+    - "forget everything about me"
 
   # Ask how long the session has been running
   session_status:
@@ -169,9 +181,12 @@ wake_word:
 # LLM  (Ollama)
 # ─────────────────────────────────────────────────────────────────────────────
 llm:
+  # llama3.2:3b is small and tends to lose the thread. If you have the RAM
+  # headroom, qwen2.5:7b (4.4 GB) follows context far better:  ollama pull qwen2.5:7b
+  # On an 8 GB M1 with vision running, llama3.2:3b is the safe default.
   model: "llama3.2:3b"
   base_url: "http://localhost:11434"
-  temperature: 0.7
+  temperature: 0.6        # a touch lower = more on-topic, less rambling
   context_window: 4096
   stream: true
   max_tokens: 150   # 128=brief | 150=casual | 256=detailed | 512+=long-form
@@ -217,20 +232,27 @@ audio:
 # Conversation loop
 # ─────────────────────────────────────────────────────────────────────────────
 conversation:
-  timeout: 20    # seconds of silence before returning to wake-word mode
+  timeout: 20            # seconds of silence before returning to wake-word mode
+  interrupt_grace: 0.8   # seconds before barge-in activates while Sterling speaks
+                         # (self-echo guard filters his own voice, so this is short)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Memory
 # ─────────────────────────────────────────────────────────────────────────────
 memory:
-  max_history: 10         # turns kept in the active session window
+  max_history: 12         # turns kept in the active session window
   persist: true           # write every message to memory_file with timestamps
   memory_file: "memory.json"
-  recall_turns: 2         # turns recalled from last session as background context
-  chroma_enabled: true    # semantic long-term memory via ChromaDB
+  recall_turns: 2         # turns anchored from last session for continuity
+  recall_results: 3       # relevant past exchanges injected via keyword recall
+  facts_file: "facts.json"  # durable facts: "remember that I like jazz"
+  # ChromaDB is optional and currently unavailable on Python 3.14 (native
+  # bindings missing). Keyword recall + the facts store handle long-term memory
+  # with no native deps. Leave this on; it falls back cleanly.
+  chroma_enabled: false
   chroma_path: ".chroma"
-  chroma_results: 3       # past exchanges injected per LLM call
+  chroma_results: 3
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -291,6 +313,12 @@ vision:
 
   # Expression detection
   smile_threshold: 0.04           # lip-curve ratio to flag someone as smiling  (0.02–0.08)
+
+  # Vision-language model (real pixel understanding for "what am I holding",
+  # "describe the scene"). Leave blank to use fast YOLO + heuristics only.
+  # To enable:  ollama pull moondream   then set:  vlm_model: "moondream"
+  # moondream is ~1.7 GB and fits an 8 GB M1. llava is larger/more capable.
+  vlm_model: ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
